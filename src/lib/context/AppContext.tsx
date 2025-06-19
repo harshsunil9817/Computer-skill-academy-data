@@ -88,41 +88,57 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
 
   const addCourse = async (courseData: CourseFormData) => {
-    if (!db) { console.error("Firestore 'db' not available for addCourse"); return; }
+    if (!db) { 
+      console.error("Firestore 'db' not available for addCourse");
+      throw new Error("Database not available. Please try again later.");
+    }
     const coursesCollectionRef = collection(db, 'courses');
     try {
       const docRef = await addDoc(coursesCollectionRef, courseData);
       setCourses((prev) => [...prev, { ...courseData, id: docRef.id }]);
     } catch (error) {
-      console.error("Error adding course:", error);
+      console.error("Error adding course to Firestore:", error);
+      throw error; // Re-throw the error to be caught by the calling page
     }
   };
 
   const updateCourse = async (updatedCourse: Course) => {
-    if (!db) { console.error("Firestore 'db' not available for updateCourse"); return; }
-    const courseDoc = doc(db, 'courses', updatedCourse.id);
+    if (!db) {
+      console.error("Firestore 'db' not available for updateCourse");
+      throw new Error("Database not available. Please try again later.");
+    }
+    const courseDocRef = doc(db, 'courses', updatedCourse.id);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { id, ...courseDataToUpdate } = updatedCourse; 
     try {
-      await updateDoc(courseDoc, courseDataToUpdate);
+      await updateDoc(courseDocRef, courseDataToUpdate);
       setCourses((prev) => prev.map(c => c.id === updatedCourse.id ? updatedCourse : c));
     } catch (error) {
-      console.error("Error updating course:", error);
+      console.error("Error updating course in Firestore:", error);
+      throw error;
     }
   };
 
   const deleteCourse = async (courseId: string) => {
-    if (!db) { console.error("Firestore 'db' not available for deleteCourse"); return; }
-    const courseDoc = doc(db, 'courses', courseId);
+    if (!db) {
+      console.error("Firestore 'db' not available for deleteCourse");
+      throw new Error("Database not available. Please try again later.");
+    }
+    const courseDocRef = doc(db, 'courses', courseId);
     try {
-      await deleteDoc(courseDoc);
+      await deleteDoc(courseDocRef);
       setCourses(prev => prev.filter(c => c.id !== courseId));
     } catch (error) {
-      console.error("Error deleting course:", error);
+      console.error("Error deleting course from Firestore:", error);
+      throw error;
     }
   };
 
   const addStudent = async (studentData: StudentFormData) => {
-    if (!db) { console.error("Firestore 'db' not available for addStudent"); return; }
+    if (!db) { 
+      console.error("Firestore 'db' not available for addStudent");
+      throw new Error("Database not available. Please try again later.");
+    }
     const studentsCollectionRef = collection(db, 'students');
     const newStudentPayload: Omit<Student, 'id'> = {
       ...studentData,
@@ -138,13 +154,18 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       const docRef = await addDoc(studentsCollectionRef, payloadForFirestore);
       setStudents((prev) => [...prev, { ...newStudentPayload, id: docRef.id }]);
     } catch (error) {
-      console.error("Error adding student:", error);
+      console.error("Error adding student to Firestore:", error);
+      throw error;
     }
   };
   
   const updateStudent = async (updatedStudent: Student) => {
-    if (!db) { console.error("Firestore 'db' not available for updateStudent"); return; }
-    const studentDoc = doc(db, 'students', updatedStudent.id);
+    if (!db) {
+       console.error("Firestore 'db' not available for updateStudent");
+       throw new Error("Database not available. Please try again later.");
+    }
+    const studentDocRef = doc(db, 'students', updatedStudent.id);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { id, ...studentDataToUpdate } = updatedStudent;
     try {
       const payloadForFirestore = {
@@ -155,27 +176,30 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
             date: Timestamp.fromDate(new Date(p.date)),
         })),
       };
-      await updateDoc(studentDoc, payloadForFirestore);
+      await updateDoc(studentDocRef, payloadForFirestore);
       setStudents((prev) => prev.map(s => s.id === updatedStudent.id ? updatedStudent : s));
-    } catch (error)
-      {
-      console.error("Error updating student:", error);
+    } catch (error) {
+      console.error("Error updating student in Firestore:", error);
+      throw error;
     }
   };
   
   const addPayment = async (studentId: string, paymentData: Omit<PaymentRecord, 'id'>) => {
-    if (!db) { console.error("Firestore 'db' not available for addPayment"); return; }
+    if (!db) { 
+      console.error("Firestore 'db' not available for addPayment");
+      throw new Error("Database not available. Please try again later.");
+    }
     const studentRef = doc(db, 'students', studentId);
     try {
         const currentStudent = students.find(s => s.id === studentId);
         if (!currentStudent) {
             console.error("Student not found for payment");
-            return; 
+            throw new Error("Student not found to add payment.");
         }
 
         const newPayment: PaymentRecord = { 
             ...paymentData, 
-            id: doc(collection(db, '_')).id, 
+            id: doc(collection(db, '_')).id, // Generate a client-side ID for the payment record
             date: paymentData.date, 
         };
         
@@ -205,7 +229,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         );
 
     } catch (error) {
-        console.error("Error adding payment:", error);
+        console.error("Error adding payment to Firestore:", error);
+        throw error;
     }
   };
 
@@ -234,3 +259,5 @@ export const useAppContext = () => {
   }
   return context;
 };
+
+    

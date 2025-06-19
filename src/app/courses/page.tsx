@@ -41,22 +41,31 @@ export default function CoursesPage() {
     }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!courseForm.name || courseForm.enrollmentFee <= 0 || courseForm.monthlyFee <= 0) {
       toast({ title: "Error", description: "Please fill all fields with valid values.", variant: "destructive" });
       return;
     }
-    if (editingCourse) {
-      updateCourse({ ...editingCourse, ...courseForm });
-      toast({ title: "Success", description: "Course updated successfully." });
-    } else {
-      addCourse(courseForm);
-      toast({ title: "Success", description: "Course added successfully." });
+    try {
+      if (editingCourse) {
+        await updateCourse({ ...editingCourse, ...courseForm });
+        toast({ title: "Success", description: "Course updated successfully." });
+      } else {
+        await addCourse(courseForm);
+        toast({ title: "Success", description: "Course added successfully." });
+      }
+      setIsDialogOpen(false);
+      setCourseForm(initialCourseFormState);
+      setEditingCourse(null);
+    } catch (error: any) {
+      console.error("Course operation failed:", error);
+      toast({
+        title: "Operation Failed",
+        description: error.message || "Could not save course. Please check the console for more details.",
+        variant: "destructive",
+      });
     }
-    setIsDialogOpen(false);
-    setCourseForm(initialCourseFormState);
-    setEditingCourse(null);
   };
 
   const openAddDialog = () => {
@@ -71,10 +80,19 @@ export default function CoursesPage() {
     setIsDialogOpen(true);
   };
 
-  const handleDeleteCourse = (courseId: string) => {
-    // Add confirmation dialog here if needed
-    deleteCourse(courseId);
-    toast({ title: "Success", description: "Course deleted successfully." });
+  const handleDeleteCourse = async (courseId: string) => {
+    // Add confirmation dialog here if needed via AlertDialog component
+    try {
+      await deleteCourse(courseId);
+      toast({ title: "Success", description: "Course deleted successfully." });
+    } catch (error: any) {
+      console.error("Delete course failed:", error);
+      toast({
+        title: "Deletion Failed",
+        description: error.message || "Could not delete course. Please check the console for more details.",
+        variant: "destructive",
+      });
+    }
   };
   
   if (isLoading) {
@@ -171,3 +189,5 @@ export default function CoursesPage() {
     </>
   );
 }
+
+    
