@@ -180,20 +180,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           fileToUpload
         );
         console.log("Appwrite file upload response:", fileUploadResponse);
-        // Construct the URL to view/preview the file
-        // Option 1: Using getFileView (direct link, might force download for some types if not image)
         const fileViewUrl = appwriteStorage.getFileView(APPWRITE_STUDENT_PHOTOS_BUCKET_ID, fileUploadResponse.$id);
         photoUrlToSave = fileViewUrl.href; 
-        // Option 2: Using getFilePreview (can specify width/height, good for thumbnails)
-        // const filePreviewUrl = appwriteStorage.getFilePreview(APPWRITE_STUDENT_PHOTOS_BUCKET_ID, fileUploadResponse.$id, 400); // width 400px
-        // photoUrlToSave = filePreviewUrl.href;
         console.log("Photo URL to save:", photoUrlToSave);
       }
     } catch (uploadError: any) {
       console.error("Error uploading photo to Appwrite:", uploadError);
-      // Decide if you want to proceed without photo or throw error
-      // For now, we'll proceed without photo if upload fails, but log it.
-      // Consider a toast message to the user here in a real app.
     }
 
 
@@ -277,21 +269,27 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
         const newPayment: PaymentRecord = {
             ...paymentData,
-            id: doc(collection(db, '_')).id, // Firestore auto-ID for sub-collection like item, not a real sub-collection here.
-            date: paymentData.date, // Keep as ISO string, convert before Firestore write
+            id: doc(collection(db, '_')).id, 
+            date: paymentData.date, 
         };
 
         const updatedPaymentHistory = [...currentStudent.paymentHistory, newPayment];
 
         let newStatus = currentStudent.status;
+        // If enrollment fee is paid and student was pending, activate them
         if (paymentData.type === 'enrollment' && currentStudent.status === 'enrollment_pending') {
-            newStatus = 'active';
+            const course = courses.find(c => c.id === currentStudent.courseId);
+            const enrollmentFeePaid = updatedPaymentHistory
+                .filter(p => p.type === 'enrollment')
+                .reduce((sum, p) => sum + p.amount, 0);
+            if (course && enrollmentFeePaid >= course.enrollmentFee) {
+                newStatus = 'active';
+            }
         }
-
-        // Prepare payment history for Firestore (convert dates to Timestamps)
+        
         const paymentHistoryForFirestore = updatedPaymentHistory.map(p => ({
             ...p,
-            date: Timestamp.fromDate(new Date(p.date)), // Convert ISO string to Date, then to Timestamp
+            date: Timestamp.fromDate(new Date(p.date)), 
         }));
 
         await updateDoc(studentRef, {
@@ -299,11 +297,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
             status: newStatus,
         });
 
-        // Update local state, ensuring dates in paymentHistory remain ISO strings for consistency
         setStudents(prevStudents =>
             prevStudents.map(s =>
                 s.id === studentId
-                ? { ...s, paymentHistory: updatedPaymentHistory.map(p=> ({...p, date: new Date(p.date).toISOString()})), status: newStatus }
+                ? mapDocToStudent({ ...s, paymentHistory: updatedPaymentHistory, status: newStatus })
                 : s
             )
         );
@@ -319,7 +316,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       console.error("Firestore 'db' not available for deleteStudent");
       throw new Error("Database not available. Please try again later.");
     }
-    // Note: Does not delete Appwrite photo. Consider adding that if needed.
     const studentDocRef = doc(db, 'students', studentId);
     try {
       await deleteDoc(studentDocRef);
@@ -341,21 +337,13 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     students.forEach(student => {
       const studentRef = doc(db, 'students', student.id);
       let newStatus = student.status;
+      
+      const enrollmentPaidBeforeClear = student.paymentHistory.some(p => p.type === 'enrollment');
 
-      // If student completed (paid or unpaid), reset status based on enrollment payment.
-      // If student is active, check if enrollment was paid. If not, set to enrollment_pending.
-      // 'left' status should remain 'left'.
-      if (student.status === 'completed_paid' || student.status === 'completed_unpaid') {
-        // Check original payment history (before clearing) if enrollment was paid
-        const enrollmentPaid = student.paymentHistory.some(p => p.type === 'enrollment');
-        newStatus = enrollmentPaid ? 'active' : 'enrollment_pending';
-      } else if (student.status === 'active') {
-         const enrollmentPaid = student.paymentHistory.some(p => p.type === 'enrollment');
-         if (!enrollmentPaid) { // If active but somehow enrollment wasn't logged (or cleared already)
-            newStatus = 'enrollment_pending';
-         }
+      if (student.status === 'completed_paid' || student.status === 'completed_unpaid' || student.status === 'active') {
+        newStatus = enrollmentPaidBeforeClear ? 'active' : 'enrollment_pending';
       }
-      // Do not change status if 'enrollment_pending' or 'left'
+      // 'left' status remains 'left', 'enrollment_pending' remains 'enrollment_pending' unless it was active due to paid enrollment
 
       batch.update(studentRef, { paymentHistory: [], status: newStatus });
       updatedStudentsLocally.push({ ...student, paymentHistory: [], status: newStatus });
@@ -363,7 +351,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
     try {
       await batch.commit();
-      setStudents(updatedStudentsLocally.map(mapDocToStudent)); // re-map to ensure data consistency
+      setStudents(updatedStudentsLocally.map(mapDocToStudent)); 
     } catch (error: any) {
       console.error("Error clearing payment histories in Firestore:", error);
       throw error;

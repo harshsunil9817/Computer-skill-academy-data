@@ -12,7 +12,7 @@ export interface PaymentRecord {
   id: string;
   date: string; // ISO string
   amount: number;
-  type: 'enrollment' | 'monthly' | 'partial';
+  type: 'enrollment' | 'monthly' | 'partial' | 'advance'; // Added 'advance'
   monthFor?: string; // e.g., "January 2024" for monthly fee
   remarks?: string;
 }
