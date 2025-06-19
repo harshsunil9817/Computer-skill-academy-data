@@ -11,7 +11,8 @@ import {
   updateDoc, 
   deleteDoc, 
   doc,
-  Timestamp
+  Timestamp,
+  writeBatch
 } from 'firebase/firestore';
 
 interface AppContextType {
@@ -20,9 +21,11 @@ interface AppContextType {
   addCourse: (course: CourseFormData) => Promise<void>;
   updateCourse: (course: Course) => Promise<void>;
   deleteCourse: (courseId: string) => Promise<void>;
-  addStudent: (student: StudentFormData) => Promise<void>; // StudentFormData now has enrollmentDate as object
-  updateStudent: (student: Student) => Promise<void>;
+  addStudent: (student: StudentFormData) => Promise<void>; 
+  updateStudent: (studentId: string, studentData: Partial<Omit<Student, 'id' | 'paymentHistory' | 'enrollmentDate'> & { enrollmentDate?: string | Date, paymentHistory?: Omit<PaymentRecord, 'id'>[] | PaymentRecord[] }>) => Promise<void>;
   addPayment: (studentId: string, payment: Omit<PaymentRecord, 'id'>) => Promise<void>;
+  deleteStudent: (studentId: string) => Promise<void>;
+  clearAllPaymentHistories: () => Promise<void>;
   isLoading: boolean;
 }
 
@@ -121,6 +124,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       console.error("Firestore 'db' not available for deleteCourse");
       throw new Error("Database not available. Please try again later.");
     }
+    // Check if any student is enrolled in this course
+    const isCourseInUse = students.some(student => student.courseId === courseId);
+    if (isCourseInUse) {
+      throw new Error("Cannot delete course. Students are currently enrolled in it.");
+    }
+
     const courseDocRef = doc(db, 'courses', courseId);
     try {
       await deleteDoc(courseDocRef);
@@ -131,14 +140,13 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const addStudent = async (studentData: StudentFormData) => { // studentData.enrollmentDate is now an object
+  const addStudent = async (studentData: StudentFormData) => { 
     if (!db) { 
       console.error("Firestore 'db' not available for addStudent");
       throw new Error("Database not available. Please try again later.");
     }
     const studentsCollectionRef = collection(db, 'students');
 
-    // Convert enrollmentDate from object to ISO string
     const { enrollmentDate: enrollmentDateObj, ...restOfStudentData } = studentData;
     const isoEnrollmentDate = `${enrollmentDateObj.year}-${String(enrollmentDateObj.month).padStart(2, '0')}-${String(enrollmentDateObj.day).padStart(2, '0')}`;
 
@@ -152,10 +160,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     try {
       const payloadForFirestore = {
         ...newStudentPayload,
-        enrollmentDate: Timestamp.fromDate(new Date(newStudentPayload.enrollmentDate)), // Ensure it's a Firestore Timestamp
+        enrollmentDate: Timestamp.fromDate(new Date(newStudentPayload.enrollmentDate)), 
       };
       const docRef = await addDoc(studentsCollectionRef, payloadForFirestore);
-      // For local state, use the newStudentPayload which has ISO string date
       setStudents((prev) => [...prev, { ...newStudentPayload, id: docRef.id }]);
     } catch (error: any) {
       console.error("Error adding student to Firestore:", error);
@@ -163,32 +170,36 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     }
   };
   
-  const updateStudent = async (updatedStudent: Student) => {
+  const updateStudent = async (studentId: string, studentData: Partial<Omit<Student, 'id' | 'paymentHistory' | 'enrollmentDate'> & { enrollmentDate?: string | Date, paymentHistory?: Omit<PaymentRecord, 'id'>[] | PaymentRecord[] }>) => {
     if (!db) {
        console.error("Firestore 'db' not available for updateStudent");
        throw new Error("Database not available. Please try again later.");
     }
-    const studentDocRef = doc(db, 'students', updatedStudent.id);
-    const { id, ...studentDataToUpdate } = updatedStudent;
-    try {
-      // Ensure enrollmentDate is converted to Timestamp for Firestore
-      const enrollmentDateForFirestore = studentDataToUpdate.enrollmentDate instanceof Date 
-                                          ? Timestamp.fromDate(studentDataToUpdate.enrollmentDate)
-                                          : Timestamp.fromDate(new Date(studentDataToUpdate.enrollmentDate));
+    const studentDocRef = doc(db, 'students', studentId);
+    
+    const payloadForFirestore: Record<string, any> = { ...studentData };
 
-      const paymentHistoryForFirestore = studentDataToUpdate.paymentHistory.map(p => ({
+    if (studentData.enrollmentDate) {
+      payloadForFirestore.enrollmentDate = studentData.enrollmentDate instanceof Date 
+                                          ? Timestamp.fromDate(studentData.enrollmentDate)
+                                          : Timestamp.fromDate(new Date(studentData.enrollmentDate));
+    }
+    if (studentData.paymentHistory) {
+       payloadForFirestore.paymentHistory = studentData.paymentHistory.map(p => ({
           ...p,
           date: p.date instanceof Date ? Timestamp.fromDate(p.date) : Timestamp.fromDate(new Date(p.date)),
       }));
+    }
 
-      const payloadForFirestore = {
-        ...studentDataToUpdate,
-        enrollmentDate: enrollmentDateForFirestore,
-        paymentHistory: paymentHistoryForFirestore,
-      };
-      await updateDoc(studentDocRef, payloadForFirestore as any); // Using 'as any' to bypass strict type checking for Firestore specific types if needed
-      // For local state, ensure dates remain in ISO string format if that's what mapDocToStudent produces
-      setStudents((prev) => prev.map(s => s.id === updatedStudent.id ? mapDocToStudent(updatedStudent) : s));
+    try {
+      await updateDoc(studentDocRef, payloadForFirestore);
+      setStudents((prevStudents) => 
+        prevStudents.map(s => 
+          s.id === studentId 
+          ? mapDocToStudent({ ...s, ...studentData, enrollmentDate: studentData.enrollmentDate ? new Date(studentData.enrollmentDate).toISOString() : s.enrollmentDate, paymentHistory: studentData.paymentHistory ? studentData.paymentHistory.map(p=> ({...p, date: new Date(p.date).toISOString()})) : s.paymentHistory }) 
+          : s
+        )
+      );
     } catch (error: any) {
       console.error("Error updating student in Firestore:", error);
       throw error;
@@ -234,7 +245,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         setStudents(prevStudents =>
             prevStudents.map(s => 
                 s.id === studentId 
-                ? { ...s, paymentHistory: updatedPaymentHistory, status: newStatus } 
+                ? { ...s, paymentHistory: updatedPaymentHistory.map(p=> ({...p, date: new Date(p.date).toISOString()})), status: newStatus } 
                 : s
             )
         );
@@ -242,6 +253,59 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     } catch (error: any) {
         console.error("Error adding payment to Firestore:", error);
         throw error;
+    }
+  };
+
+  const deleteStudent = async (studentId: string) => {
+    if (!db) {
+      console.error("Firestore 'db' not available for deleteStudent");
+      throw new Error("Database not available. Please try again later.");
+    }
+    const studentDocRef = doc(db, 'students', studentId);
+    try {
+      await deleteDoc(studentDocRef);
+      setStudents(prev => prev.filter(s => s.id !== studentId));
+    } catch (error: any) {
+      console.error("Error deleting student from Firestore:", error);
+      throw error;
+    }
+  };
+
+  const clearAllPaymentHistories = async () => {
+    if (!db) {
+      console.error("Firestore 'db' not available for clearAllPaymentHistories");
+      throw new Error("Database not available. Please try again later.");
+    }
+    const batch = writeBatch(db);
+    const updatedStudentsLocally: Student[] = [];
+
+    students.forEach(student => {
+      const studentRef = doc(db, 'students', student.id);
+      let newStatus = student.status;
+
+      if (student.status === 'completed_paid' || student.status === 'completed_unpaid') {
+        // Check if enrollment fee was ever paid
+        const enrollmentPaid = student.paymentHistory.some(p => p.type === 'enrollment');
+        newStatus = enrollmentPaid ? 'active' : 'enrollment_pending';
+      } else if (student.status === 'active') {
+         const enrollmentPaid = student.paymentHistory.some(p => p.type === 'enrollment');
+         if (!enrollmentPaid) { // Should ideally not happen if active, but good check
+            newStatus = 'enrollment_pending';
+         }
+      }
+      // 'left' status remains 'left'
+      // 'enrollment_pending' remains as it is
+
+      batch.update(studentRef, { paymentHistory: [], status: newStatus });
+      updatedStudentsLocally.push({ ...student, paymentHistory: [], status: newStatus });
+    });
+
+    try {
+      await batch.commit();
+      setStudents(updatedStudentsLocally.map(mapDocToStudent)); // Re-map to ensure date consistency
+    } catch (error: any) {
+      console.error("Error clearing payment histories in Firestore:", error);
+      throw error;
     }
   };
 
@@ -254,7 +318,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         deleteCourse, 
         addStudent, 
         updateStudent, 
-        addPayment, 
+        addPayment,
+        deleteStudent,
+        clearAllPaymentHistories, 
         isLoading 
     }}>
       {children}

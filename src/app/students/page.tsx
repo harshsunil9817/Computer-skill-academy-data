@@ -1,9 +1,27 @@
 
 "use client";
 import React, { useState, useEffect } from 'react';
-import { PlusCircle, User, Users, MoreVertical, CreditCard, History, DollarSign, CalendarCheck2, CheckCircle } from 'lucide-react';
+import { PlusCircle, User, Users, MoreVertical, CreditCard, History, DollarSign, CalendarCheck2, CheckCircle, Trash2, UserMinus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogHeader, 
+  DialogTitle, 
+  DialogFooter, 
+  DialogClose 
+} from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -13,11 +31,11 @@ import { useAppContext } from '@/lib/context/AppContext';
 import type { Student, StudentFormData, Course, PaymentRecord } from '@/lib/types';
 import { DateOfBirthPicker } from '@/components/students/DateOfBirthPicker';
 import { EnrollmentDateDropdownPicker } from '@/components/students/EnrollmentDateDropdownPicker';
-import { DOB_DAYS, DOB_MONTHS, DOB_YEARS, COURSE_DURATION_UNITS, MOBILE_REGEX, AADHAR_REGEX } from '@/lib/constants';
+import { DOB_DAYS, DOB_MONTHS, DOB_YEARS, COURSE_DURATION_UNITS, MOBILE_REGEX, AADHAR_REGEX, ENROLLMENT_YEARS } from '@/lib/constants';
 import { useToast } from '@/hooks/use-toast';
 import { format, addMonths, isBefore, isEqual, startOfMonth, parse } from 'date-fns';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import Link from 'next/link';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
@@ -45,10 +63,10 @@ const initialStudentFormState: StudentFormData = {
 type PaymentType = 'enrollment' | 'monthly' | 'partial';
 
 interface BillableMonthForDialog {
-  monthYear: string; // "MMMM yyyy"
+  monthYear: string; 
   dueDate: Date;
   amountPaidThisMonth: number;
-  amountDueThisMonth: number; // Full monthly fee
+  amountDueThisMonth: number; 
   isFullyPaid: boolean;
   remainingDue: number;
 }
@@ -61,7 +79,7 @@ const initialPaymentFormState = {
 };
 
 export default function StudentsPage() {
-  const { students, courses, addStudent, isLoading, addPayment } = useAppContext();
+  const { students, courses, addStudent, isLoading, addPayment, updateStudent, deleteStudent } = useAppContext();
   const [isAddStudentDialogOpen, setIsAddStudentDialogOpen] = useState(false);
   const [studentForm, setStudentForm] = useState<StudentFormData>(initialStudentFormState);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
@@ -102,14 +120,14 @@ export default function StudentsPage() {
         });
         setBillableMonthsForDialog([]);
         setSelectedMonthsToPayInDialog({});
-      } else { // Active or completed_unpaid
+      } else { 
          setPaymentForm({ 
           type: 'monthly', 
-          amount: 0, // Amount will be derived from selected months for 'monthly'
+          amount: 0, 
           monthFor: format(new Date(), "MMMM yyyy"), 
           remarks: `Monthly fee for ${studentCourseForPayment.name}`,
         });
-        // Calculate billable months for the dialog if type is 'monthly'
+        
         const months: BillableMonthForDialog[] = [];
         const currentDate = startOfMonth(new Date());
         const enrollmentDate = startOfMonth(new Date(recordingPaymentForStudent.enrollmentDate));
@@ -222,7 +240,6 @@ export default function StudentsPage() {
 
   const openRecordPaymentDialog = (student: Student) => {
     setRecordingPaymentForStudent(student);
-    // useEffect will set paymentForm and billableMonthsForDialog
     setIsRecordPaymentDialogOpen(true);
   };
   
@@ -235,7 +252,7 @@ export default function StudentsPage() {
         if (newType === 'enrollment' && studentCourseForPayment && recordingPaymentForStudent?.status === 'enrollment_pending') {
             newAmount = studentCourseForPayment.enrollmentFee;
         } else if (newType === 'monthly' && studentCourseForPayment) {
-             newAmount = 0; // For monthly, amount is derived from selected months
+             newAmount = 0; 
         } else if (newType === 'partial' && studentCourseForPayment) {
             newAmount = paymentForm.amount > 0 && paymentForm.type === 'partial' ? paymentForm.amount : 0; 
         }
@@ -269,7 +286,7 @@ export default function StudentsPage() {
           toast({ title: "Info", description: "No months selected for payment or all selected months are already paid/have no dues.", variant: "default" });
           return;
         }
-
+        let paymentsRecordedCount = 0;
         for (const monthPayment of monthsToPayInDialog) {
           await addPayment(recordingPaymentForStudent.id, {
             date: new Date().toISOString(),
@@ -278,10 +295,13 @@ export default function StudentsPage() {
             monthFor: monthPayment.monthYear, 
             remarks: paymentForm.remarks || `Payment for ${monthPayment.monthYear} for ${studentCourseForPayment.name}`
           });
+          paymentsRecordedCount++;
         }
-        toast({ title: "Success", description: `Payments recorded for ${monthsToPayInDialog.length} selected month(s) for ${recordingPaymentForStudent.name}.` });
+        if (paymentsRecordedCount > 0) {
+            toast({ title: "Success", description: `Payments recorded for ${paymentsRecordedCount} selected month(s) for ${recordingPaymentForStudent.name}.` });
+        }
 
-      } else { // Enrollment or Partial
+      } else { 
         if (paymentForm.amount <= 0) {
           toast({ title: "Error", description: "Payment amount must be greater than zero.", variant: "destructive" });
           return;
@@ -299,15 +319,15 @@ export default function StudentsPage() {
           date: new Date().toISOString(),
           amount: paymentForm.amount,
           type: paymentForm.type,
-          monthFor: paymentForm.type === 'partial' ? paymentForm.monthFor.trim() : undefined,
+          monthFor: paymentForm.type === 'partial' ? paymentForm.monthFor.trim() : (paymentForm.type === 'enrollment' ? undefined : paymentForm.monthFor.trim()),
           remarks: paymentForm.remarks || `${paymentForm.type.charAt(0).toUpperCase() + paymentForm.type.slice(1)} fee for ${studentCourseForPayment.name}${paymentForm.monthFor && paymentForm.type === 'partial' ? ` for ${paymentForm.monthFor.trim()}` : ''}`,
         };
         await addPayment(recordingPaymentForStudent.id, paymentDetails);
-        toast({ title: "Success", description: `${paymentForm.type.charAt(0).toUpperCase() + paymentForm.type.slice(1)} payment of ₹${paymentForm.amount} recorded for ${recordingPaymentForStudent.name}.` });
+        toast({ title: "Success", description: `${paymentForm.type.charAt(0).toUpperCase() + paymentForm.type.slice(1)} payment of ₹${paymentForm.amount.toLocaleString()} recorded for ${recordingPaymentForStudent.name}.` });
       }
       
       setIsRecordPaymentDialogOpen(false);
-      setRecordingPaymentForStudent(null); // This will trigger useEffect to reset paymentForm & billableMonths
+      setRecordingPaymentForStudent(null); 
       setPaymentForm(initialPaymentFormState);
       setSelectedMonthsToPayInDialog({});
 
@@ -317,6 +337,23 @@ export default function StudentsPage() {
     }
   };
   
+  const handleMarkAsLeft = async (studentId: string) => {
+    try {
+      await updateStudent(studentId, { status: 'left' });
+      toast({ title: "Success", description: "Student marked as left." });
+    } catch (error: any) {
+      toast({ title: "Error", description: `Failed to mark student as left: ${error.message}`, variant: "destructive" });
+    }
+  };
+
+  const handleDeleteStudent = async (studentId: string) => {
+    try {
+      await deleteStudent(studentId);
+      toast({ title: "Success", description: "Student deleted successfully." });
+    } catch (error: any) {
+      toast({ title: "Error", description: `Failed to delete student: ${error.message}`, variant: "destructive" });
+    }
+  };
 
   const pageHeader = (
     <PageHeader
@@ -376,8 +413,8 @@ export default function StudentsPage() {
             </div>
             {selectedCourseDetails && (
               <div className="grid grid-cols-2 gap-4 p-3 border rounded-md bg-primary/5">
-                  <p className="text-sm">Enrollment Fee: <span className="font-bold text-primary">₹{selectedCourseDetails.enrollmentFee}</span></p>
-                  <p className="text-sm">Monthly Fee: <span className="font-bold text-primary">₹{selectedCourseDetails.monthlyFee}</span></p>
+                  <p className="text-sm">Enrollment Fee: <span className="font-bold text-primary">₹{selectedCourseDetails.enrollmentFee.toLocaleString()}</span></p>
+                  <p className="text-sm">Monthly Fee: <span className="font-bold text-primary">₹{selectedCourseDetails.monthlyFee.toLocaleString()}</span></p>
               </div>
             )}
             <div className="grid grid-cols-2 gap-4">
@@ -505,7 +542,7 @@ export default function StudentsPage() {
                                 type="number" 
                                 value={paymentForm.amount} 
                                 onChange={handlePaymentFormChange}
-                                disabled // Enrollment fee is fixed
+                                disabled 
                                 required 
                             />
                         </div>
@@ -602,7 +639,7 @@ export default function StudentsPage() {
                             disabled={
                                 (paymentForm.type === 'enrollment' && paymentForm.amount <= 0) ||
                                 (paymentForm.type === 'partial' && paymentForm.amount <= 0) ||
-                                (paymentForm.type === 'monthly' && currentlySelectedMonthsForPaymentInDialog.length === 0)
+                                (paymentForm.type === 'monthly' && currentlySelectedMonthsForPaymentInDialog.length === 0 && billableMonthsForDialog.some(bm => !bm.isFullyPaid && bm.remainingDue > 0))
                             }
                         >
                            {paymentForm.type === 'monthly' ? 'Record Selected Month(s)' : 'Record Payment'}
@@ -693,6 +730,49 @@ export default function StudentsPage() {
                             <DropdownMenuItem onClick={() => openRecordPaymentDialog(student)} className="cursor-pointer">
                                 <DollarSign className="mr-2 h-4 w-4" /> Record Payment
                             </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                    <DropdownMenuItem onSelect={(e) => e.preventDefault()} className="cursor-pointer">
+                                        <UserMinus className="mr-2 h-4 w-4 text-orange-500" /> Mark as Left
+                                    </DropdownMenuItem>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                    <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                        This will mark {student.name} as having left the academy. Their records will be moved to archived.
+                                    </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction onClick={() => handleMarkAsLeft(student.id)} className={cn(buttonVariants({variant: "outline"}))}>
+                                        Confirm
+                                    </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                </AlertDialogContent>
+                            </AlertDialog>
+                            <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                    <DropdownMenuItem onSelect={(e) => e.preventDefault()} className="cursor-pointer">
+                                        <Trash2 className="mr-2 h-4 w-4 text-destructive" /> Delete Student
+                                    </DropdownMenuItem>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                    <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                        This action cannot be undone. This will permanently delete {student.name} and all their associated data, including payment history.
+                                    </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction onClick={() => handleDeleteStudent(student.id)} className={cn(buttonVariants({variant: "destructive"}))}>
+                                        Delete Student
+                                    </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                </AlertDialogContent>
+                            </AlertDialog>
                         </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
