@@ -80,12 +80,20 @@ export default function BillingPage() {
     const enrollmentDate = parseISO(selectedStudent.enrollmentDate);
     if (isNaN(enrollmentDate.getTime())) return [];
 
+    // Calculate course duration in months
     const courseDurationInMonths = selectedStudent.courseDurationValue * (selectedStudent.courseDurationUnit === 'years' ? 12 : 1);
-    const courseEndDate = addMonths(startOfMonth(enrollmentDate), courseDurationInMonths +1); // +1 because fees start month after enrollment
     
-    let currentProcessingMonth = addMonths(startOfMonth(enrollmentDate),1); // Fees start month after enrollment
+    // Determine the course end date for fee calculation purposes
+    // Fees start the month *after* enrollment and continue for the duration of the course.
+    // So, if a 3-month course enrolls in Jan, fees are for Feb, Mar, Apr.
+    // The loop should go up to and include the last billable month.
+    const firstBillableMonth = addMonths(startOfMonth(enrollmentDate), 1);
+    const lastBillableMonth = addMonths(firstBillableMonth, courseDurationInMonths - 1);
+    const loopEndDate = addMonths(lastBillableMonth, 1); // Loop until the month *after* the last billable month
 
-    while(isBefore(currentProcessingMonth, courseEndDate)) {
+    let currentProcessingMonth = firstBillableMonth;
+
+    while(isBefore(currentProcessingMonth, loopEndDate)) {
       const monthYearStr = format(currentProcessingMonth, "MMMM yyyy");
       const paymentsForThisMonth = selectedStudent.paymentHistory
         .filter(p => (p.type === 'monthly' || p.type === 'partial') && p.monthFor === monthYearStr)
@@ -109,15 +117,13 @@ export default function BillingPage() {
   }, [selectedStudent, selectedStudentCourse]);
 
 
-  const { totalOutstandingDues, effectiveAdvanceBalance, finalBillableMonthsDetails } = useMemo(() => {
+  const { totalOutstandingDues, effectiveAdvanceBalance, finalBillableMonthsDetails, finalBillableMonthDate } = useMemo(() => {
     if (!selectedStudent || !selectedStudentCourse) {
-      return { totalOutstandingDues: 0, effectiveAdvanceBalance: 0, finalBillableMonthsDetails: [] };
+      return { totalOutstandingDues: 0, effectiveAdvanceBalance: 0, finalBillableMonthsDetails: [], finalBillableMonthDate: null };
     }
 
     let currentTotalDues = enrollmentFeeDue;
     billableMonthsDetails.forEach(month => {
-        // Only count past/current months' *remaining dues* for outstanding dues if not covered by advance.
-        // Advance will be applied later to reduce this.
         if(isBefore(month.monthDate, addMonths(startOfMonth(new Date()),1))) { 
              currentTotalDues += month.remainingDue;
         }
@@ -130,14 +136,12 @@ export default function BillingPage() {
     let _effectiveAdvanceBalance = advancePaymentsTotal;
     let tempTotalDues = enrollmentFeeDue;
 
-    // Apply advance to enrollment fee first
     if (tempTotalDues > 0 && _effectiveAdvanceBalance > 0) {
         const amountToCoverEnrollment = Math.min(_effectiveAdvanceBalance, tempTotalDues);
         tempTotalDues -= amountToCoverEnrollment;
         _effectiveAdvanceBalance -= amountToCoverEnrollment;
     }
     
-    // Apply advance to past/current billable months before calculating final outstanding dues
     const monthsWithAdvanceApplied = billableMonthsDetails.map(month => {
         let newRemainingDue = month.remainingDue;
         let coveredByAdvance = false;
@@ -145,20 +149,22 @@ export default function BillingPage() {
             const amountToCover = Math.min(_effectiveAdvanceBalance, newRemainingDue);
             newRemainingDue -= amountToCover;
             _effectiveAdvanceBalance -= amountToCover;
-            coveredByAdvance = newRemainingDue <= 0;
+            coveredByAdvance = newRemainingDue <= 0; // Mark as covered if advance paid it off
         }
-        // Add to total dues *after* this potential advance application for past/current months
+        
         if(isBefore(month.monthDate, addMonths(startOfMonth(new Date()),1))) {
-            tempTotalDues += newRemainingDue;
+            tempTotalDues += newRemainingDue; 
         }
         return { ...month, remainingDue: newRemainingDue, isCoveredByAdvance: coveredByAdvance, isFullyPaid: newRemainingDue <= 0 };
     });
 
+    const _finalBillableMonthDate = monthsWithAdvanceApplied.length > 0 ? monthsWithAdvanceApplied[monthsWithAdvanceApplied.length - 1].monthDate : null;
 
     return { 
         totalOutstandingDues: tempTotalDues, 
-        effectiveAdvanceBalance: _effectiveAdvanceBalance, // what's left of advance after covering applicable items
-        finalBillableMonthsDetails: monthsWithAdvanceApplied
+        effectiveAdvanceBalance: _effectiveAdvanceBalance, 
+        finalBillableMonthsDetails: monthsWithAdvanceApplied,
+        finalBillableMonthDate: _finalBillableMonthDate
     };
 
   }, [selectedStudent, selectedStudentCourse, billableMonthsDetails, enrollmentFeeDue]);
@@ -171,16 +177,6 @@ export default function BillingPage() {
     let paymentType: PaymentRecord['type'] = 'enrollment';
     let remarks = `Enrollment fee for ${selectedStudentCourse.name}`;
 
-    // Try to use advance balance first
-    if (effectiveAdvanceBalance > 0) {
-        const advanceToUse = Math.min(effectiveAdvanceBalance, amountToPay);
-        // This scenario is tricky: AppContext.addPayment doesn't directly handle "paying with advance"
-        // For now, we'll record a direct 'enrollment' payment. Advance logic primarily affects display & outstanding calculation.
-        // A more complex system would create a "payment from advance" transaction.
-        // For simplicity, we assume advance already reduced `enrollmentFeeDue` or `totalOutstandingDues` if applicable.
-        // So, this button always means "make a new payment for the visible due amount".
-    }
-
     try {
       await addPayment(selectedStudent.id, {
         date: new Date().toISOString(),
@@ -189,7 +185,6 @@ export default function BillingPage() {
         remarks: remarks
       });
       toast({ title: "Success", description: `Enrollment fee of ₹${amountToPay.toLocaleString()} paid for ${selectedStudent.name}.` });
-      // State will refresh due to AppContext update
     } catch (error: any) {
       toast({ title: "Error", description: `Failed to pay enrollment fee: ${error.message}`, variant: "destructive" });
     }
@@ -198,11 +193,14 @@ export default function BillingPage() {
   const handlePaySelectedMonths = async () => {
     if (!selectedStudent || !selectedStudentCourse) return;
     const monthsToPayNow = finalBillableMonthsDetails.filter(
-      bm => selectedMonthsToPay[bm.monthYear] && bm.remainingDue > 0 && !bm.isCoveredByAdvance
+      bm => {
+        const isThisTheFinalMonth = finalBillableMonthDate && isEqual(startOfMonth(bm.monthDate), startOfMonth(finalBillableMonthDate));
+        return selectedMonthsToPay[bm.monthYear] && bm.remainingDue > 0 && !bm.isCoveredByAdvance && !isThisTheFinalMonth;
+      }
     );
 
     if (monthsToPayNow.length === 0) {
-      toast({ title: "Info", description: "No months selected or selected months have no remaining dues/are advance covered.", variant: "default" });
+      toast({ title: "Info", description: "No valid months selected for payment, or selected months have no remaining dues, are advance covered, or include the final course month.", variant: "default" });
       return;
     }
 
@@ -217,7 +215,7 @@ export default function BillingPage() {
         });
       }
       toast({ title: "Success", description: `Payments recorded for ${monthsToPayNow.length} selected month(s) for ${selectedStudent.name}.` });
-      setSelectedMonthsToPay({}); // Reset selection
+      setSelectedMonthsToPay({}); 
     } catch (error: any) {
       toast({ title: "Error", description: `Failed to process payments for selected months: ${error.message}`, variant: "destructive" });
     }
@@ -233,7 +231,7 @@ export default function BillingPage() {
 
     try {
       if (adhocPaymentType === 'settle_dues') {
-        if (totalOutstandingDues === 0 && enrollmentFeeDue === 0) { // Check both enrollment and monthly
+        if (totalOutstandingDues === 0 && enrollmentFeeDue === 0) { 
             toast({ title: "Info", description: `${selectedStudent.name} has no outstanding dues to settle.`, variant: "default" });
             return;
         }
@@ -249,8 +247,8 @@ export default function BillingPage() {
         await addPayment(selectedStudent.id, {
           date: new Date().toISOString(),
           amount: amount,
-          type: 'partial', // 'partial' is used to signify it's covering some existing due.
-          monthFor: oldestDueItemRemark || undefined, // AppContext might make this more specific if needed
+          type: 'partial', 
+          monthFor: oldestDueItemRemark || undefined, 
           remarks: adhocPaymentRemarks || `Payment towards outstanding dues${oldestDueItemRemark ? ` (towards ${oldestDueItemRemark})`:''}`
         });
         toast({ title: "Success", description: `Payment of ₹${amount.toLocaleString()} towards dues recorded for ${selectedStudent.name}.`});
@@ -369,34 +367,41 @@ export default function BillingPage() {
                 <h4 className="font-semibold mb-2 text-md text-primary">Monthly Fee Payments</h4>
                 <ScrollArea className="h-[calc(100vh-48rem)] pr-2 border rounded-md p-2 bg-muted/20">
                   {finalBillableMonthsDetails.length > 0 ? (
-                    finalBillableMonthsDetails.map(month => (
-                      <div key={month.monthYear} className="flex items-center justify-between p-2.5 mb-2 rounded-md bg-background shadow-sm hover:shadow-md transition-shadow">
-                        <div className="flex items-center">
-                          <Checkbox
-                            id={`month-${month.monthYear}`}
-                            checked={selectedMonthsToPay[month.monthYear] || month.isFullyPaid || month.isCoveredByAdvance}
-                            disabled={month.isFullyPaid || month.isCoveredByAdvance || month.remainingDue <=0}
-                            onCheckedChange={(checked) => setSelectedMonthsToPay(prev => ({ ...prev, [month.monthYear]: !!checked }))}
-                          />
-                          <Label htmlFor={`month-${month.monthYear}`} className="ml-3 text-sm">
-                            {month.monthYear} (Fee: ₹{month.feeForMonth.toLocaleString()})
-                          </Label>
+                    finalBillableMonthsDetails.map(month => {
+                      const isThisTheFinalMonth = finalBillableMonthDate && isEqual(startOfMonth(month.monthDate), startOfMonth(finalBillableMonthDate));
+                      return (
+                        <div key={month.monthYear} className="flex items-center justify-between p-2.5 mb-2 rounded-md bg-background shadow-sm hover:shadow-md transition-shadow">
+                          <div className="flex items-center">
+                            <Checkbox
+                              id={`month-${month.monthYear}`}
+                              checked={selectedMonthsToPay[month.monthYear] || month.isFullyPaid || month.isCoveredByAdvance}
+                              disabled={month.isFullyPaid || month.isCoveredByAdvance || month.remainingDue <=0 || isThisTheFinalMonth}
+                              onCheckedChange={(checked) => setSelectedMonthsToPay(prev => ({ ...prev, [month.monthYear]: !!checked }))}
+                            />
+                            <Label htmlFor={`month-${month.monthYear}`} className="ml-3 text-sm">
+                              {month.monthYear} (Fee: ₹{month.feeForMonth.toLocaleString()})
+                              {isThisTheFinalMonth && <span className="text-xs text-muted-foreground ml-1">(Final Month)</span>}
+                            </Label>
+                          </div>
+                          <div className="text-xs">
+                            {month.isFullyPaid ? (
+                              month.isCoveredByAdvance ? <span className="text-accent font-semibold">Paid (Advance)</span> : <span className="text-green-600 font-semibold">Paid</span>
+                            ) : (
+                              <span className="text-destructive">Due: ₹{month.remainingDue.toLocaleString()}</span>
+                            )}
+                            {month.paidForMonth > 0 && !month.isFullyPaid && <span className="text-muted-foreground ml-1">(Paid: ₹{month.paidForMonth.toLocaleString()})</span>}
+                          </div>
                         </div>
-                        <div className="text-xs">
-                          {month.isFullyPaid ? (
-                             month.isCoveredByAdvance ? <span className="text-accent font-semibold">Paid (Advance)</span> : <span className="text-green-600 font-semibold">Paid</span>
-                          ) : (
-                            <span className="text-destructive">Due: ₹{month.remainingDue.toLocaleString()}</span>
-                          )}
-                           {month.paidForMonth > 0 && !month.isFullyPaid && <span className="text-muted-foreground ml-1">(Paid: ₹{month.paidForMonth.toLocaleString()})</span>}
-                        </div>
-                      </div>
-                    ))
+                      );
+                    })
                   ) : (
                      <p className="text-sm text-muted-foreground p-4 text-center">No monthly fees applicable yet or course completed.</p>
                   )}
                 </ScrollArea>
-                {finalBillableMonthsDetails.some(m => selectedMonthsToPay[m.monthYear] && m.remainingDue > 0 && !m.isCoveredByAdvance) && (
+                {finalBillableMonthsDetails.some(m => {
+                    const isThisTheFinalMonth = finalBillableMonthDate && isEqual(startOfMonth(m.monthDate), startOfMonth(finalBillableMonthDate));
+                    return selectedMonthsToPay[m.monthYear] && m.remainingDue > 0 && !m.isCoveredByAdvance && !isThisTheFinalMonth;
+                }) && (
                     <Button onClick={handlePaySelectedMonths} className="mt-3 w-full animate-button-click">
                         <DollarSign className="mr-2 h-4 w-4"/>Pay for Selected Month(s)
                     </Button>
