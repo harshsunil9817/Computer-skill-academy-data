@@ -1,3 +1,4 @@
+
 export interface Course {
   id: string;
   name: string;
@@ -40,4 +41,16 @@ export interface Student {
 
 // For form handling
 export type CourseFormData = Omit<Course, 'id'>;
-export type StudentFormData = Omit<Student, 'id' | 'status' | 'paymentHistory'>;
+
+// StudentFormData now has enrollmentDate as an object for easier form handling with dropdowns
+export interface StudentFormData {
+  name: string;
+  fatherName: string;
+  dob: { day: string; month: string; year: string };
+  mobile: string;
+  aadhar: string;
+  enrollmentDate: { day: string; month: string; year: string; }; // Changed from string to object
+  courseId: string;
+  courseDurationValue: number;
+  courseDurationUnit: 'months' | 'years';
+}

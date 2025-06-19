@@ -1,7 +1,7 @@
 
 "use client";
 import React, { useState, useEffect } from 'react';
-import { PlusCircle, User, Users, CalendarDays, MoreVertical, CreditCard, History, DollarSign } from 'lucide-react';
+import { PlusCircle, User, Users, MoreVertical, CreditCard, History, DollarSign } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -12,25 +12,28 @@ import { PageHeader } from '@/components/ui/page-header';
 import { useAppContext } from '@/lib/context/AppContext';
 import type { Student, StudentFormData, Course, PaymentRecord } from '@/lib/types';
 import { DateOfBirthPicker } from '@/components/students/DateOfBirthPicker';
+import { EnrollmentDateDropdownPicker } from '@/components/students/EnrollmentDateDropdownPicker'; // Import new component
 import { DOB_DAYS, DOB_MONTHS, DOB_YEARS, COURSE_DURATION_UNITS, MOBILE_REGEX, AADHAR_REGEX } from '@/lib/constants';
 import { useToast } from '@/hooks/use-toast';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Calendar } from '@/components/ui/calendar';
 import { format } from 'date-fns';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { cn } from '@/lib/utils';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import Link from 'next/link';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 
+const today = new Date();
 const initialStudentFormState: StudentFormData = {
   name: '',
   fatherName: '',
   dob: { day: DOB_DAYS[0], month: DOB_MONTHS[0].value, year: DOB_YEARS[0] },
   mobile: '',
   aadhar: '',
-  enrollmentDate: new Date().toISOString().split('T')[0],
+  enrollmentDate: { // Updated to object for dropdowns
+    day: String(today.getDate()).padStart(2, '0'),
+    month: String(today.getMonth() + 1).padStart(2, '0'), // Month is 0-indexed in JS Date
+    year: String(today.getFullYear()),
+  },
   courseId: '',
   courseDurationValue: 1,
   courseDurationUnit: 'months',
@@ -49,7 +52,7 @@ export default function StudentsPage() {
   const { students, courses, addStudent, isLoading, addPayment } = useAppContext();
   const [isAddStudentDialogOpen, setIsAddStudentDialogOpen] = useState(false);
   const [studentForm, setStudentForm] = useState<StudentFormData>(initialStudentFormState);
-  const [editingStudent, setEditingStudent] = useState<Student | null>(null); // Placeholder for edit functionality
+  const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [selectedCourseDetails, setSelectedCourseDetails] = useState<{enrollmentFee: number, monthlyFee: number} | null>(null);
   const { toast } = useToast();
 
@@ -59,7 +62,6 @@ export default function StudentsPage() {
   const [paymentForm, setPaymentForm] = useState(initialPaymentFormState);
   
   const studentCourseForPayment = recordingPaymentForStudent ? courses.find(c => c.id === recordingPaymentForStudent.courseId) : null;
-
 
   useEffect(() => {
     if (studentForm.courseId && courses.length > 0) {
@@ -81,21 +83,22 @@ export default function StudentsPage() {
           ...prev,
           type: 'enrollment',
           amount: studentCourseForPayment.enrollmentFee,
-          monthFor: '', // Not applicable for enrollment
+          monthFor: '', 
+          remarks: `Enrollment fee for ${studentCourseForPayment.name}`,
         }));
       } else {
          setPaymentForm(prev => ({
           ...prev,
-          type: 'monthly', // Default to monthly for active students
-          amount: studentCourseForPayment.monthlyFee, // Pre-fill with monthly fee
-          monthFor: format(new Date(), "MMMM yyyy"), // Default to current month
+          type: 'monthly', 
+          amount: studentCourseForPayment.monthlyFee,
+          monthFor: format(new Date(), "MMMM yyyy"),
+          remarks: `Monthly fee for ${studentCourseForPayment.name}`,
         }));
       }
     } else {
       setPaymentForm(initialPaymentFormState);
     }
   }, [recordingPaymentForStudent, studentCourseForPayment]);
-
 
   const handleStudentFormInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -110,10 +113,8 @@ export default function StudentsPage() {
     setStudentForm(prev => ({ ...prev, dob }));
   };
 
-  const handleEnrollmentDateChange = (date: Date | undefined) => {
-    if (date) {
-      setStudentForm(prev => ({ ...prev, enrollmentDate: date.toISOString().split('T')[0] }));
-    }
+  const handleEnrollmentDateObjChange = (dateObj: { day: string; month: string; year: string }) => { // New handler for object
+    setStudentForm(prev => ({ ...prev, enrollmentDate: dateObj }));
   };
 
   const handleAddStudentSubmit = async (e: React.FormEvent) => {
@@ -132,11 +133,18 @@ export default function StudentsPage() {
     }
 
     try {
-      // Editing student functionality is not implemented in this path
       await addStudent(studentForm); 
       toast({ title: "Success", description: "Student added successfully. Enrollment fee pending." });
       setIsAddStudentDialogOpen(false);
-      setStudentForm(initialStudentFormState);
+      const todayForForm = new Date();
+      setStudentForm({
+        ...initialStudentFormState,
+        enrollmentDate: {
+          day: String(todayForForm.getDate()).padStart(2, '0'),
+          month: String(todayForForm.getMonth() + 1).padStart(2, '0'),
+          year: String(todayForForm.getFullYear()),
+        }
+      });
       setSelectedCourseDetails(null);
     } catch (error: any) {
       console.error("Student operation failed:", error);
@@ -150,7 +158,15 @@ export default function StudentsPage() {
 
   const openAddStudentDialog = () => {
     setEditingStudent(null);
-    setStudentForm({...initialStudentFormState, enrollmentDate: new Date().toISOString().split('T')[0]});
+    const todayForForm = new Date();
+    setStudentForm({
+        ...initialStudentFormState,
+        enrollmentDate: {
+          day: String(todayForForm.getDate()).padStart(2, '0'),
+          month: String(todayForForm.getMonth() + 1).padStart(2, '0'),
+          year: String(todayForForm.getFullYear()),
+        }
+      });
     setSelectedCourseDetails(null);
     setIsAddStudentDialogOpen(true);
   };
@@ -190,7 +206,7 @@ export default function StudentsPage() {
         if (newType === 'enrollment' && studentCourseForPayment && recordingPaymentForStudent?.status === 'enrollment_pending') {
             newAmount = studentCourseForPayment.enrollmentFee;
         } else if ((newType === 'monthly' || newType === 'partial') && studentCourseForPayment) {
-             newAmount = paymentForm.amount > 0 && paymentForm.type === newType ? paymentForm.amount : studentCourseForPayment.monthlyFee; // Retain amount if type hasn't changed and amount is set
+             newAmount = paymentForm.amount > 0 && paymentForm.type === newType ? paymentForm.amount : studentCourseForPayment.monthlyFee;
         }
          setPaymentForm(prev => ({ ...prev, type: newType, amount: newAmount }));
     } else if (name === 'amount') {
@@ -280,25 +296,7 @@ export default function StudentsPage() {
             </div>
             <div className="space-y-1">
               <Label htmlFor="enrollmentDate">Enrollment Date</Label>
-               <Popover>
-                  <PopoverTrigger asChild>
-                  <Button
-                      variant={"outline"}
-                      className={cn("w-full justify-start text-left font-normal", !studentForm.enrollmentDate && "text-muted-foreground")}
-                  >
-                      <CalendarDays className="mr-2 h-4 w-4" />
-                      {studentForm.enrollmentDate ? format(new Date(studentForm.enrollmentDate), "PPP") : <span>Pick a date</span>}
-                  </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0">
-                  <Calendar
-                      mode="single"
-                      selected={studentForm.enrollmentDate ? new Date(studentForm.enrollmentDate) : undefined}
-                      onSelect={handleEnrollmentDateChange}
-                      initialFocus
-                  />
-                  </PopoverContent>
-              </Popover>
+              <EnrollmentDateDropdownPicker id="enrollmentDate" value={studentForm.enrollmentDate} onChange={handleEnrollmentDateObjChange} />
             </div>
             <div className="space-y-1">
               <Label htmlFor="courseId">Course</Label>
@@ -505,6 +503,8 @@ export default function StudentsPage() {
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 animate-slide-in">
           {students.map((student) => {
             const course = courses.find(c => c.id === student.courseId);
+            const enrollmentDateObj = new Date(student.enrollmentDate);
+            const formattedEnrollmentDate = !isNaN(enrollmentDateObj.getTime()) ? enrollmentDateObj.toLocaleDateString() : 'N/A';
             return (
               <Card key={student.id} className="flex flex-col shadow-lg hover:shadow-xl transition-shadow duration-300">
                 <CardHeader>
@@ -527,7 +527,7 @@ export default function StudentsPage() {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                            <DropdownMenuItem asChild>
-                             <Link href="/billing" className="flex items-center w-full"> {/* Can add query params later: /billing?studentId=${student.id} */}
+                             <Link href="/billing" className="flex items-center w-full">
                                 <CreditCard className="mr-2 h-4 w-4" /> Go to Billing
                              </Link>
                            </DropdownMenuItem>
@@ -543,11 +543,10 @@ export default function StudentsPage() {
                 </CardHeader>
                 <CardContent className="flex-grow space-y-2">
                   <p className="text-sm text-muted-foreground">Course: <span className="font-semibold text-foreground">{course?.name || 'N/A'}</span></p>
-                  <p className="text-sm text-muted-foreground">Enrolled: <span className="font-semibold text-foreground">{new Date(student.enrollmentDate).toLocaleDateString()}</span></p>
+                  <p className="text-sm text-muted-foreground">Enrolled: <span className="font-semibold text-foreground">{formattedEnrollmentDate}</span></p>
                   <p className="text-sm text-muted-foreground">Mobile: <span className="font-semibold text-foreground">{student.mobile}</span></p>
                   <p className="text-sm text-muted-foreground">Status: <span className="font-semibold text-foreground capitalize">{student.status.replace('_', ' ')}</span></p>
                 </CardContent>
-                {/* Footer removed as actions are in dropdown */}
               </Card>
             );
           })}
@@ -559,4 +558,3 @@ export default function StudentsPage() {
     </>
   );
 }
-    

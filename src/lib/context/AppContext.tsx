@@ -3,7 +3,7 @@
 import type { ReactNode } from 'react';
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { Course, Student, PaymentRecord, StudentFormData, CourseFormData } from '@/lib/types';
-import { db, app as firebaseAppInstance } from '@/lib/firebase'; // Import Firestore instance and app
+import { db, app as firebaseAppInstance } from '@/lib/firebase'; 
 import { 
   collection, 
   getDocs, 
@@ -20,7 +20,7 @@ interface AppContextType {
   addCourse: (course: CourseFormData) => Promise<void>;
   updateCourse: (course: Course) => Promise<void>;
   deleteCourse: (courseId: string) => Promise<void>;
-  addStudent: (student: StudentFormData) => Promise<void>;
+  addStudent: (student: StudentFormData) => Promise<void>; // StudentFormData now has enrollmentDate as object
   updateStudent: (student: Student) => Promise<void>;
   addPayment: (studentId: string, payment: Omit<PaymentRecord, 'id'>) => Promise<void>;
   isLoading: boolean;
@@ -36,7 +36,6 @@ const mapDocToStudent = (docData: any): Student => ({
       date: p.date instanceof Timestamp ? p.date.toDate().toISOString() : p.date,
   })) || [],
 });
-
 
 export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [courses, setCourses] = useState<Course[]>([]);
@@ -86,7 +85,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-
   const addCourse = async (courseData: CourseFormData) => {
     if (!db) { 
       console.error("Firestore 'db' not available for addCourse");
@@ -96,9 +94,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     try {
       const docRef = await addDoc(coursesCollectionRef, courseData);
       setCourses((prev) => [...prev, { ...courseData, id: docRef.id }]);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error adding course to Firestore:", error);
-      throw error; // Re-throw the error to be caught by the calling page
+      throw error;
     }
   };
 
@@ -108,12 +106,11 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       throw new Error("Database not available. Please try again later.");
     }
     const courseDocRef = doc(db, 'courses', updatedCourse.id);
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { id, ...courseDataToUpdate } = updatedCourse; 
     try {
       await updateDoc(courseDocRef, courseDataToUpdate);
       setCourses((prev) => prev.map(c => c.id === updatedCourse.id ? updatedCourse : c));
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error updating course in Firestore:", error);
       throw error;
     }
@@ -128,32 +125,39 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     try {
       await deleteDoc(courseDocRef);
       setCourses(prev => prev.filter(c => c.id !== courseId));
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error deleting course from Firestore:", error);
       throw error;
     }
   };
 
-  const addStudent = async (studentData: StudentFormData) => {
+  const addStudent = async (studentData: StudentFormData) => { // studentData.enrollmentDate is now an object
     if (!db) { 
       console.error("Firestore 'db' not available for addStudent");
       throw new Error("Database not available. Please try again later.");
     }
     const studentsCollectionRef = collection(db, 'students');
+
+    // Convert enrollmentDate from object to ISO string
+    const { enrollmentDate: enrollmentDateObj, ...restOfStudentData } = studentData;
+    const isoEnrollmentDate = `${enrollmentDateObj.year}-${String(enrollmentDateObj.month).padStart(2, '0')}-${String(enrollmentDateObj.day).padStart(2, '0')}`;
+
     const newStudentPayload: Omit<Student, 'id'> = {
-      ...studentData,
-      enrollmentDate: studentData.enrollmentDate, 
+      ...restOfStudentData,
+      enrollmentDate: isoEnrollmentDate, 
       status: 'enrollment_pending',
       paymentHistory: [],
     };
+
     try {
       const payloadForFirestore = {
         ...newStudentPayload,
-        enrollmentDate: Timestamp.fromDate(new Date(newStudentPayload.enrollmentDate)),
+        enrollmentDate: Timestamp.fromDate(new Date(newStudentPayload.enrollmentDate)), // Ensure it's a Firestore Timestamp
       };
       const docRef = await addDoc(studentsCollectionRef, payloadForFirestore);
+      // For local state, use the newStudentPayload which has ISO string date
       setStudents((prev) => [...prev, { ...newStudentPayload, id: docRef.id }]);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error adding student to Firestore:", error);
       throw error;
     }
@@ -165,20 +169,27 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
        throw new Error("Database not available. Please try again later.");
     }
     const studentDocRef = doc(db, 'students', updatedStudent.id);
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { id, ...studentDataToUpdate } = updatedStudent;
     try {
+      // Ensure enrollmentDate is converted to Timestamp for Firestore
+      const enrollmentDateForFirestore = studentDataToUpdate.enrollmentDate instanceof Date 
+                                          ? Timestamp.fromDate(studentDataToUpdate.enrollmentDate)
+                                          : Timestamp.fromDate(new Date(studentDataToUpdate.enrollmentDate));
+
+      const paymentHistoryForFirestore = studentDataToUpdate.paymentHistory.map(p => ({
+          ...p,
+          date: p.date instanceof Date ? Timestamp.fromDate(p.date) : Timestamp.fromDate(new Date(p.date)),
+      }));
+
       const payloadForFirestore = {
         ...studentDataToUpdate,
-        enrollmentDate: Timestamp.fromDate(new Date(studentDataToUpdate.enrollmentDate)),
-        paymentHistory: studentDataToUpdate.paymentHistory.map(p => ({
-            ...p,
-            date: Timestamp.fromDate(new Date(p.date)),
-        })),
+        enrollmentDate: enrollmentDateForFirestore,
+        paymentHistory: paymentHistoryForFirestore,
       };
-      await updateDoc(studentDocRef, payloadForFirestore);
-      setStudents((prev) => prev.map(s => s.id === updatedStudent.id ? updatedStudent : s));
-    } catch (error) {
+      await updateDoc(studentDocRef, payloadForFirestore as any); // Using 'as any' to bypass strict type checking for Firestore specific types if needed
+      // For local state, ensure dates remain in ISO string format if that's what mapDocToStudent produces
+      setStudents((prev) => prev.map(s => s.id === updatedStudent.id ? mapDocToStudent(updatedStudent) : s));
+    } catch (error: any) {
       console.error("Error updating student in Firestore:", error);
       throw error;
     }
@@ -199,7 +210,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
         const newPayment: PaymentRecord = { 
             ...paymentData, 
-            id: doc(collection(db, '_')).id, // Generate a client-side ID for the payment record
+            id: doc(collection(db, '_')).id, 
             date: paymentData.date, 
         };
         
@@ -228,12 +239,11 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
             )
         );
 
-    } catch (error) {
+    } catch (error: any) {
         console.error("Error adding payment to Firestore:", error);
         throw error;
     }
   };
-
 
   return (
     <AppContext.Provider value={{ 
@@ -259,5 +269,3 @@ export const useAppContext = () => {
   }
   return context;
 };
-
-    
