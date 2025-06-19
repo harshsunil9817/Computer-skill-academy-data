@@ -1,11 +1,12 @@
 
 "use client";
 import { useEffect, useState } from 'react';
-import { Users, DollarSign, UserPlus, TrendingUp, Loader2 } from 'lucide-react';
+import { Users, DollarSign, UserPlus, TrendingUp, Loader2, IndianRupee } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
 import { useAppContext } from '@/lib/context/AppContext';
 import type { Student, Course } from '@/lib/types';
+import { format, parseISO, addMonths, startOfMonth, isBefore, differenceInCalendarMonths, getMonth, getYear } from 'date-fns';
 
 interface StatCardProps {
   title: string;
@@ -43,6 +44,7 @@ const initialDashboardStats = {
   feesDueThisMonth: 0,
   totalRevenue: 0,
   newRegistrationsThisMonth: 0,
+  totalDuesAllTime: 0,
 };
 
 export default function DashboardPage() {
@@ -51,17 +53,13 @@ export default function DashboardPage() {
   const [isCalculatingStats, setIsCalculatingStats] = useState(true);
 
   useEffect(() => {
-    // Start loading animation for stats immediately if app context is already done loading.
-    // Otherwise, wait for app context to finish.
     if (!isAppContextLoading) {
       setIsCalculatingStats(true);
     } else {
-      // If app context is still loading, ensure we show calculating when it's done.
       setIsCalculatingStats(true);
-      return; // Wait for app context to load data
+      return; 
     }
 
-    // Proceed with calculations only if base data is available
     if (students.length > 0 && courses.length > 0) {
       const startTime = performance.now();
       console.log("Dashboard: Starting stats recalculation...");
@@ -72,50 +70,108 @@ export default function DashboardPage() {
       });
 
       const currentDate = new Date();
-      const currentMonth = currentDate.getMonth();
-      const currentYear = currentDate.getFullYear();
+      const currentMonthStart = startOfMonth(currentDate);
+      const currentMonthForFeeCheck = getMonth(currentDate);
+      const currentYearForFeeCheck = getYear(currentDate);
+
 
       let activeStudentsCount = 0;
       let newRegistrationsThisMonthCount = 0;
       let feesDueThisMonthAgg = 0;
       let totalRevenueAgg = 0;
+      let totalDuesAllTimeAgg = 0;
 
       students.forEach(student => {
         if (student.status === 'active' || student.status === 'enrollment_pending') {
           activeStudentsCount++;
         }
 
-        const enrollmentDate = new Date(student.enrollmentDate);
-        if (enrollmentDate.getMonth() === currentMonth && enrollmentDate.getFullYear() === currentYear) {
+        const enrollmentDate = parseISO(student.enrollmentDate);
+        if (enrollmentDate.getMonth() === currentMonthForFeeCheck && enrollmentDate.getFullYear() === currentYearForFeeCheck) {
           newRegistrationsThisMonthCount++;
         }
 
         const course = courseMap.get(student.courseId);
         if (!course) return;
 
+        // Calculate Fees Due This Month (current calendar month)
         if (student.status === 'active') {
-          const hasPaidMonthlyFeeForCurrentMonth = student.paymentHistory.some(p => {
-            if (p.type !== 'monthly' || !p.monthFor) return false;
-            try {
-              const [monthStr, yearStr] = p.monthFor.split(" ");
-              const paymentMonthIndex = new Date(Date.parse(monthStr +" 1, 2012")).getMonth();
-              return parseInt(yearStr) === currentYear && paymentMonthIndex === currentMonth;
-            } catch (e) {
-              console.warn(`Dashboard: Could not parse monthFor string: "${p.monthFor}" for student ${student.id}`);
-              return false;
-            }
-          });
+          const firstBillableMonthForStudent = addMonths(startOfMonth(enrollmentDate), 1);
+          // Check if current month is a billable month for this student
+          if (!isBefore(currentMonthStart, firstBillableMonthForStudent)) {
+            // Check if course duration covers current month
+            const courseDurationInMonths = student.courseDurationValue * (student.courseDurationUnit === 'years' ? 12 : 1);
+            const lastBillableMonthForStudent = addMonths(firstBillableMonthForStudent, courseDurationInMonths - 1);
 
-          if (!hasPaidMonthlyFeeForCurrentMonth) {
-            feesDueThisMonthAgg += course.monthlyFee;
+            if (!isBefore(lastBillableMonthForStudent, currentMonthStart)) { // current month is within course duration
+                const hasPaidForCurrentMonth = student.paymentHistory.some(p => {
+                if ((p.type !== 'monthly' && p.type !== 'partial') || !p.monthFor) return false;
+                try {
+                  // Assuming p.monthFor is "MMMM yyyy"
+                  const paymentMonthDate = parseISO(`${p.monthFor.split(" ")[1]}-${new Date(Date.parse(p.monthFor.split(" ")[0] +" 1, 2012")).getMonth() + 1}-01`);
+                  return getMonth(paymentMonthDate) === currentMonthForFeeCheck && getYear(paymentMonthDate) === currentYearForFeeCheck && p.amount >= course.monthlyFee;
+                } catch (e) {
+                  console.warn(`Dashboard: Could not parse monthFor string for current month check: "${p.monthFor}" for student ${student.id}`);
+                  return false;
+                }
+              });
+              if (!hasPaidForCurrentMonth) {
+                 feesDueThisMonthAgg += course.monthlyFee; 
+              }
+            }
           }
         } else if (student.status === 'enrollment_pending') {
-          feesDueThisMonthAgg += course.enrollmentFee;
+          // Enrollment fee is due this month if student is pending and enrolled this month or previous and not paid
+           const enrollmentFeePaid = student.paymentHistory.filter(p => p.type === 'enrollment').reduce((sum, p) => sum + p.amount, 0);
+           if (enrollmentFeePaid < course.enrollmentFee) {
+             feesDueThisMonthAgg += (course.enrollmentFee - enrollmentFeePaid);
+           }
         }
 
+        // Calculate Total Revenue
         student.paymentHistory.forEach(payment => {
           totalRevenueAgg += payment.amount;
         });
+
+        // Calculate Total Dues All Time for this student
+        if (student.status === 'active' || student.status === 'enrollment_pending' || student.status === 'completed_unpaid') {
+            let studentOutstandingDues = 0;
+            let studentAdvanceBalance = student.paymentHistory.filter(p => p.type === 'advance').reduce((sum, p) => sum + p.amount, 0);
+
+            // Enrollment Fee
+            const enrollmentPaid = student.paymentHistory.filter(p => p.type === 'enrollment').reduce((sum, p) => sum + p.amount, 0);
+            let enrollmentDue = Math.max(0, course.enrollmentFee - enrollmentPaid);
+
+            const appliedToEnrollment = Math.min(enrollmentDue, studentAdvanceBalance);
+            enrollmentDue -= appliedToEnrollment;
+            studentAdvanceBalance -= appliedToEnrollment;
+            studentOutstandingDues += enrollmentDue;
+
+            // Monthly Fees up to current month
+            if (!isNaN(enrollmentDate.getTime())) {
+                const firstBillableMonth = addMonths(startOfMonth(enrollmentDate), 1);
+                const courseDurationInMonthsTotal = student.courseDurationValue * (student.courseDurationUnit === 'years' ? 12 : 1);
+                const absoluteLastBillableMonth = addMonths(firstBillableMonth, courseDurationInMonthsTotal - 1);
+                
+                let monthToProcess = firstBillableMonth;
+                while (isBefore(monthToProcess, addMonths(currentMonthStart,1)) && isBefore(monthToProcess, addMonths(absoluteLastBillableMonth,1))) {
+                    const monthYearStr = format(monthToProcess, "MMMM yyyy");
+                    const paymentsForThisMonth = student.paymentHistory
+                        .filter(p => (p.type === 'monthly' || p.type === 'partial') && p.monthFor === monthYearStr)
+                        .reduce((sum, p) => sum + p.amount, 0);
+                    
+                    let remainingDueForMonth = Math.max(0, course.monthlyFee - paymentsForThisMonth);
+                    
+                    const appliedToMonth = Math.min(remainingDueForMonth, studentAdvanceBalance);
+                    remainingDueForMonth -= appliedToMonth;
+                    studentAdvanceBalance -= appliedToMonth;
+                    
+                    studentOutstandingDues += remainingDueForMonth;
+                    monthToProcess = addMonths(monthToProcess, 1);
+                }
+            }
+            totalDuesAllTimeAgg += studentOutstandingDues;
+        }
       });
       
       setDashboardStats({
@@ -123,16 +179,15 @@ export default function DashboardPage() {
         feesDueThisMonth: feesDueThisMonthAgg,
         totalRevenue: totalRevenueAgg,
         newRegistrationsThisMonth: newRegistrationsThisMonthCount,
+        totalDuesAllTime: totalDuesAllTimeAgg,
       });
       const endTime = performance.now();
       console.log(`Dashboard: Stats recalculated in ${endTime - startTime}ms`);
     } else if (!isAppContextLoading) { 
-      // App context is loaded, but no students/courses
       setDashboardStats(initialDashboardStats);
       console.log("Dashboard: No students or courses after app context load, stats reset.");
     }
     
-    // Always set calculating to false after attempting calculation or if no data
     if (!isAppContextLoading) {
         setIsCalculatingStats(false);
     }
@@ -146,12 +201,12 @@ export default function DashboardPage() {
   return (
     <>
       <PageHeader title="Dashboard" description="Overview of your academy's performance." />
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4 animate-slide-in">
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 animate-slide-in">
         <StatCard
           title="Active Students"
           value={dashboardStats.activeStudents}
           icon={Users}
-          description="Total students currently enrolled."
+          description="Currently enrolled."
           className="shadow-lg hover:shadow-xl transition-shadow duration-300"
           isCalculating={isCalculatingStats}
         />
@@ -159,7 +214,15 @@ export default function DashboardPage() {
           title="Fees Due This Month"
           value={`₹${dashboardStats.feesDueThisMonth.toLocaleString()}`}
           icon={DollarSign}
-          description="Expected income for the current month."
+          description="Expected current month."
+          className="shadow-lg hover:shadow-xl transition-shadow duration-300"
+          isCalculating={isCalculatingStats}
+        />
+        <StatCard
+          title="Total Dues All Time"
+          value={`₹${dashboardStats.totalDuesAllTime.toLocaleString()}`}
+          icon={IndianRupee}
+          description="All outstanding fees."
           className="shadow-lg hover:shadow-xl transition-shadow duration-300"
           isCalculating={isCalculatingStats}
         />
@@ -167,7 +230,7 @@ export default function DashboardPage() {
           title="Total Revenue"
           value={`₹${dashboardStats.totalRevenue.toLocaleString()}`}
           icon={TrendingUp}
-          description="Sum of all payments received."
+          description="All payments received."
           className="shadow-lg hover:shadow-xl transition-shadow duration-300"
           isCalculating={isCalculatingStats}
         />
@@ -175,7 +238,7 @@ export default function DashboardPage() {
           title="New Registrations"
           value={dashboardStats.newRegistrationsThisMonth}
           icon={UserPlus}
-          description="Students enrolled this month."
+          description="Enrolled this month."
           className="shadow-lg hover:shadow-xl transition-shadow duration-300"
           isCalculating={isCalculatingStats}
         />
@@ -192,9 +255,15 @@ export default function DashboardPage() {
                     <span>Loading recent activity...</span>
                  </div>
             ) : students.length > 0 ? (
-              students.slice(-3).map(s => <div key={s.id} className="py-1">{s.name} joined on {new Date(s.enrollmentDate).toLocaleDateString()}</div>)
+              students.filter(s => s.status === 'active' || s.status === 'enrollment_pending')
+                .sort((a,b) => parseISO(b.enrollmentDate).getTime() - parseISO(a.enrollmentDate).getTime())
+                .slice(0, 3)
+                .map(s => <div key={s.id} className="py-1">{s.name} joined on {new Date(s.enrollmentDate).toLocaleDateString()}</div>)
             ) : (
               <p className="text-muted-foreground">No recent student activity to display.</p>
+            )}
+            {!isCalculatingStats && students.filter(s => s.status === 'active' || s.status === 'enrollment_pending').length === 0 && (
+                 <p className="text-muted-foreground">No active students to display recent activity for.</p>
             )}
           </CardContent>
         </Card>
@@ -202,3 +271,4 @@ export default function DashboardPage() {
     </>
   );
 }
+
