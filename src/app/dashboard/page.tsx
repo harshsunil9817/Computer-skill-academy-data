@@ -5,7 +5,7 @@ import { Users, DollarSign, UserPlus, TrendingUp } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
 import { useAppContext } from '@/lib/context/AppContext';
-import type { Student } from '@/lib/types';
+import type { Student, Course } from '@/lib/types';
 
 interface StatCardProps {
   title: string;
@@ -41,54 +41,79 @@ export default function DashboardPage() {
   });
 
   useEffect(() => {
-    if (!isLoading && students.length > 0) {
-      const activeStudents = students.filter(s => s.status === 'active' || s.status === 'enrollment_pending').length;
-      
+    if (!isLoading && students.length > 0 && courses.length > 0) {
+      const startTime = performance.now();
+
+      const courseMap = new Map<string, Course>();
+      courses.forEach(course => {
+        courseMap.set(course.id, course);
+      });
+
       const currentDate = new Date();
       const currentMonth = currentDate.getMonth();
       const currentYear = currentDate.getFullYear();
 
-      const newRegistrationsThisMonth = students.filter(student => {
-        const enrollmentDate = new Date(student.enrollmentDate);
-        return enrollmentDate.getMonth() === currentMonth && enrollmentDate.getFullYear() === currentYear;
-      }).length;
-
-      let feesDueThisMonth = 0;
-      let totalRevenue = 0;
+      let activeStudentsCount = 0;
+      let newRegistrationsThisMonthCount = 0;
+      let feesDueThisMonthAgg = 0;
+      let totalRevenueAgg = 0;
 
       students.forEach(student => {
-        const course = courses.find(c => c.id === student.courseId);
-        if (!course) return;
-
-        // Calculate fees due
-        // This is a simplified calculation. Real-world would need more complex logic.
-        if (student.status === 'active') {
-          const lastPaymentForThisMonth = student.paymentHistory
-            .filter(p => p.type === 'monthly')
-            .find(p => {
-              const paymentDate = new Date(p.date);
-              return paymentDate.getMonth() === currentMonth && paymentDate.getFullYear() === currentYear;
-            });
-          if (!lastPaymentForThisMonth) {
-            feesDueThisMonth += course.monthlyFee;
-          }
-        } else if (student.status === 'enrollment_pending') {
-            feesDueThisMonth += course.enrollmentFee;
+        if (student.status === 'active' || student.status === 'enrollment_pending') {
+          activeStudentsCount++;
         }
 
+        const enrollmentDate = new Date(student.enrollmentDate);
+        if (enrollmentDate.getMonth() === currentMonth && enrollmentDate.getFullYear() === currentYear) {
+          newRegistrationsThisMonthCount++;
+        }
 
-        // Calculate total revenue
+        const course = courseMap.get(student.courseId);
+        if (!course) return;
+
+        if (student.status === 'active') {
+          const hasPaidMonthlyFeeForCurrentMonth = student.paymentHistory.some(p => {
+            if (p.type !== 'monthly' || !p.monthFor) return false;
+            try {
+              const [monthStr, yearStr] = p.monthFor.split(" ");
+              const paymentMonthIndex = new Date(Date.parse(monthStr +" 1, 2012")).getMonth();
+              return parseInt(yearStr) === currentYear && paymentMonthIndex === currentMonth;
+            } catch (e) {
+              console.warn(`Dashboard: Could not parse monthFor string: "${p.monthFor}" for student ${student.id}`);
+              return false;
+            }
+          });
+
+          if (!hasPaidMonthlyFeeForCurrentMonth) {
+            feesDueThisMonthAgg += course.monthlyFee;
+          }
+        } else if (student.status === 'enrollment_pending') {
+          // Enrollment fee is considered due if status is enrollment_pending
+          feesDueThisMonthAgg += course.enrollmentFee;
+        }
+
         student.paymentHistory.forEach(payment => {
-          totalRevenue += payment.amount;
+          totalRevenueAgg += payment.amount;
         });
       });
       
       setDashboardStats({
-        activeStudents,
-        feesDueThisMonth,
-        totalRevenue,
-        newRegistrationsThisMonth,
+        activeStudents: activeStudentsCount,
+        feesDueThisMonth: feesDueThisMonthAgg,
+        totalRevenue: totalRevenueAgg,
+        newRegistrationsThisMonth: newRegistrationsThisMonthCount,
       });
+      const endTime = performance.now();
+      console.log(`Dashboard: Stats recalculated in ${endTime - startTime}ms`);
+    } else if (!isLoading && (students.length === 0 || courses.length === 0)) {
+      // Reset stats if loading is done but no data
+      setDashboardStats({
+        activeStudents: 0,
+        feesDueThisMonth: 0,
+        totalRevenue: 0,
+        newRegistrationsThisMonth: 0,
+      });
+      console.log("Dashboard: No students or courses, stats reset.");
     }
   }, [students, courses, isLoading]);
 
@@ -130,14 +155,12 @@ export default function DashboardPage() {
         />
       </div>
       <div className="mt-8">
-        {/* Placeholder for future charts or more detailed info */}
         <Card className="shadow-lg">
           <CardHeader>
             <CardTitle>Recent Activity</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-muted-foreground">Detailed activity logs and charts will be displayed here.</p>
-            {/* Example: List last 5 new students or payments */}
             {students.slice(-3).map(s => <div key={s.id} className="py-1">{s.name} joined on {new Date(s.enrollmentDate).toLocaleDateString()}</div>)}
           </CardContent>
         </Card>
