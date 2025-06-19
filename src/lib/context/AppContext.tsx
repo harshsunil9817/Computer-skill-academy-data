@@ -45,17 +45,17 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     console.log("AppContext: useEffect triggered for data fetching.");
-
-    if (!process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) {
-        console.warn("AppContext: NEXT_PUBLIC_FIREBASE_PROJECT_ID is not set. Firebase features might not work.");
-    }
     
+    if (!process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) {
+        console.warn("AppContext: NEXT_PUBLIC_FIREBASE_PROJECT_ID is not set. Firebase features might not work as expected if other config values are also missing.");
+    }
+
     if (!db) {
       console.error("AppContext: Firestore 'db' instance is not available. Halting data fetch.");
-      setIsLoading(false); // Stop loading if db is not initialized
+      setIsLoading(false); 
       return;
     }
-    console.log("AppContext: Firestore 'db' instance seems available.");
+    console.log("AppContext: Firestore 'db' instance appears to be available.");
 
     const coursesCollectionRef = collection(db, 'courses');
     const studentsCollectionRef = collection(db, 'students');
@@ -76,8 +76,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         console.log("AppContext: Data fetching successful.");
 
       } catch (error) {
-        console.error("AppContext: Failed to load data from Firestore", error);
-        // Optionally, set some error state here to display to the user
+        console.error("AppContext: Failed to load data from Firestore. This could be a security rules issue or network problem.", error);
       } finally {
         console.log("AppContext: fetchData finished, setting isLoading to false.");
         setIsLoading(false);
@@ -176,7 +175,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
         const newPayment: PaymentRecord = { 
             ...paymentData, 
-            id: doc(collection(db, '_')).id, // Generate a client-side ID for the payment record
+            id: doc(collection(db, '_')).id, 
             date: paymentData.date, 
         };
         

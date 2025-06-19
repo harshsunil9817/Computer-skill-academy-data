@@ -15,10 +15,12 @@ const firebaseConfig = {
 };
 
 console.log("Firebase Config Check:", {
-  apiKeyExists: !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomainExists: !!process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectIdExists: !!process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  // You can add more checks here if needed
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 });
 
 // Initialize Firebase
@@ -29,9 +31,8 @@ if (!getApps().length) {
     console.log("Firebase app initialized successfully.");
   } catch (e) {
     console.error("Firebase initialization error:", e);
-    console.error("Firebase config used:", firebaseConfig);
+    console.error("Firebase config used for initialization attempt:", firebaseConfig);
     // If initialization fails, app will be undefined.
-    // db will then also likely fail or be misconfigured.
   }
 } else {
   app = getApp();
