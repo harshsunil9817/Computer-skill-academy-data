@@ -1,7 +1,7 @@
 
 "use client";
 import React, { useState, useEffect } from 'react';
-import { PlusCircle, User, Users, MoreVertical, CreditCard, History, DollarSign, CalendarCheck2 } from 'lucide-react';
+import { PlusCircle, User, Users, MoreVertical, CreditCard, History, DollarSign, CalendarCheck2, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -300,7 +300,7 @@ export default function StudentsPage() {
           amount: paymentForm.amount,
           type: paymentForm.type,
           monthFor: paymentForm.type === 'partial' ? paymentForm.monthFor.trim() : undefined,
-          remarks: paymentForm.remarks || `${paymentForm.type} fee for ${studentCourseForPayment.name}${paymentForm.monthFor && paymentForm.type === 'partial' ? ` for ${paymentForm.monthFor.trim()}` : ''}`,
+          remarks: paymentForm.remarks || `${paymentForm.type.charAt(0).toUpperCase() + paymentForm.type.slice(1)} fee for ${studentCourseForPayment.name}${paymentForm.monthFor && paymentForm.type === 'partial' ? ` for ${paymentForm.monthFor.trim()}` : ''}`,
         };
         await addPayment(recordingPaymentForStudent.id, paymentDetails);
         toast({ title: "Success", description: `${paymentForm.type.charAt(0).toUpperCase() + paymentForm.type.slice(1)} payment of ₹${paymentForm.amount} recorded for ${recordingPaymentForStudent.name}.` });
@@ -714,3 +714,4 @@ export default function StudentsPage() {
     </>
   );
 }
+
