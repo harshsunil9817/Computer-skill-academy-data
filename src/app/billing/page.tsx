@@ -34,27 +34,43 @@ function StudentFeeItem({ student, course, onPayEnrollment, onPayMonthly, onPayP
   if (!course) return null;
 
   const getDueAmount = () => {
-    if (type === 'enrollment') return course.enrollmentFee;
-    // Simplified due calculation for monthly; real-world would be more complex
-    const currentDate = new Date();
-    const enrollmentDate = new Date(student.enrollmentDate);
-    const monthsSinceEnrollment = (currentDate.getFullYear() - enrollmentDate.getFullYear()) * 12 + (currentDate.getMonth() - enrollmentDate.getMonth());
-    
-    const paidMonthlyFeesCount = student.paymentHistory.filter(p => p.type === 'monthly').length;
-    
-    // Student is considered due if months since enrollment is greater than paid monthly fees,
-    // and it's not the enrollment month itself unless explicitly handled
-    if (monthsSinceEnrollment >= 0 && monthsSinceEnrollment > paidMonthlyFeesCount ) {
-        const alreadyPaidForCurrentMonth = student.paymentHistory.some(p => {
-            if (p.type !== 'monthly' || !p.monthFor) return false;
-            const [monthStr, yearStr] = p.monthFor.split(" ");
-            const monthIdx = new Date(Date.parse(monthStr +" 1, 2012")).getMonth(); // Get month index
-            return parseInt(yearStr) === currentDate.getFullYear() && monthIdx === currentDate.getMonth();
-        });
-        if (!alreadyPaidForCurrentMonth) return course.monthlyFee * (monthsSinceEnrollment - paidMonthlyFeesCount +1); // +1 for current month due potentially
+    if (!course) return 0;
+
+    if (type === 'enrollment') { // This is for the "Enrollment Pending" tab
+      return course.enrollmentFee;
     }
-    return 0; // Default no due if logic doesn't catch or if paid up
+
+    // This is for the "Monthly Dues" tab (type === 'due')
+    // It should calculate the total outstanding amount for past monthly fees.
+    if (type === 'due' && student.status === 'active') {
+      const currentDate = new Date();
+      // Ensure time part is zeroed out for consistent date comparisons
+      currentDate.setHours(0, 0, 0, 0); 
+      
+      const enrollmentDate = new Date(student.enrollmentDate);
+      enrollmentDate.setHours(0,0,0,0);
+
+      let expectedMonthlyPaymentCycles = 0;
+      // Billing starts from the first day of the month *after* the enrollment month.
+      let nextBillingCycleStartDate = new Date(enrollmentDate.getFullYear(), enrollmentDate.getMonth() + 1, 1);
+
+      // Count how many billing cycles should have occurred up to the current date.
+      while (nextBillingCycleStartDate <= currentDate) {
+        expectedMonthlyPaymentCycles++;
+        nextBillingCycleStartDate.setMonth(nextBillingCycleStartDate.getMonth() + 1);
+      }
+
+      // Count how many monthly payment *transactions* have been made.
+      const actualMonthlyPaymentTransactions = student.paymentHistory.filter(p => p.type === 'monthly').length;
+
+      if (expectedMonthlyPaymentCycles > actualMonthlyPaymentTransactions) {
+        const numberOfUnpaidMonths = expectedMonthlyPaymentCycles - actualMonthlyPaymentTransactions;
+        return course.monthlyFee * numberOfUnpaidMonths;
+      }
+    }
+    return 0; // No due amount if not enrollment type or no outstanding monthly dues
   };
+
 
   const dueAmount = getDueAmount();
 
@@ -105,9 +121,14 @@ function StudentFeeItem({ student, course, onPayEnrollment, onPayMonthly, onPayP
               <Button
                 onClick={() => {
                   const amount = parseFloat(partialAmount);
-                  if (amount > 0 && amount < dueAmount) {
+                  // Ensure partial amount is less than total due and greater than 0
+                  if (amount > 0 && amount < dueAmount) { 
                     onPayPartial?.(student.id, amount, course);
                     setPartialAmount('');
+                  } else if (amount >= dueAmount) {
+                     toast({ title: "Info", description: "Partial payment cannot be equal to or exceed the full due amount. Use 'Pay Full Due' instead.", variant: "default"});
+                  } else {
+                     toast({ title: "Error", description: "Invalid partial payment amount.", variant: "destructive"});
                   }
                 }}
                 variant="outline"
@@ -135,8 +156,8 @@ function StudentFeeItem({ student, course, onPayEnrollment, onPayMonthly, onPayP
 
 
 export default function BillingPage() {
-  const { students, courses, addPayment, isLoading } = useAppContext();
-  const { toast } = useToast();
+  const { students, courses, addPayment, isLoading, toast: contextToast } = useAppContext(); // Assuming context provides a toast
+  const { toast } = useToast(); // This is the page-level toast
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('enrollment');
   
@@ -149,8 +170,11 @@ export default function BillingPage() {
       amount: course.enrollmentFee,
       type: 'enrollment',
       remarks: `Enrollment fee for ${course.name}`
+    }).then(() => {
+      toast({ title: "Success", description: `${students.find(s=>s.id === studentId)?.name}'s enrollment fee paid.` });
+    }).catch(error => {
+      toast({ title: "Error", description: `Failed to process enrollment payment: ${error.message}`, variant: "destructive" });
     });
-    toast({ title: "Success", description: `${students.find(s=>s.id === studentId)?.name}'s enrollment fee paid.` });
   };
 
   const handlePayMonthly = (studentId: string, amount: number, course: Course) => {
@@ -158,10 +182,13 @@ export default function BillingPage() {
       date: new Date().toISOString(),
       amount: amount,
       type: 'monthly',
-      monthFor: format(new Date(), "MMMM yyyy"), // Example: "July 2024"
+      monthFor: format(new Date(), "MMMM yyyy"), 
       remarks: `Monthly fee for ${course.name}`
+    }).then(() => {
+      toast({ title: "Success", description: `Monthly fee paid for ${students.find(s=>s.id === studentId)?.name}.` });
+    }).catch(error => {
+       toast({ title: "Error", description: `Failed to process monthly payment: ${error.message}`, variant: "destructive" });
     });
-    toast({ title: "Success", description: `Monthly fee paid for ${students.find(s=>s.id === studentId)?.name}.` });
   };
   
   const handlePayPartial = (studentId: string, amount: number, course: Course) => {
@@ -171,8 +198,11 @@ export default function BillingPage() {
       type: 'partial',
       monthFor: format(new Date(), "MMMM yyyy"),
       remarks: `Partial monthly fee for ${course.name}`
+    }).then(() => {
+      toast({ title: "Success", description: `Partial payment recorded for ${students.find(s=>s.id === studentId)?.name}.` });
+    }).catch(error => {
+      toast({ title: "Error", description: `Failed to process partial payment: ${error.message}`, variant: "destructive" });
     });
-    toast({ title: "Success", description: `Partial payment recorded for ${students.find(s=>s.id === studentId)?.name}.` });
   };
 
   const openHistoryDialog = (student: Student) => {
@@ -187,26 +217,26 @@ export default function BillingPage() {
 
   const enrollmentPendingStudents = filteredStudents.filter(s => s.status === 'enrollment_pending');
   
-  // This is a very simplified due calculation. A robust system would track each month's due status.
   const dueFeeStudents = filteredStudents.filter(s => {
     if (s.status !== 'active') return false;
     const course = courses.find(c => c.id === s.courseId);
     if (!course) return false;
 
     const currentDate = new Date();
+    currentDate.setHours(0,0,0,0);
     const enrollmentDate = new Date(s.enrollmentDate);
+    enrollmentDate.setHours(0,0,0,0);
+        
+    let expectedMonthlyPaymentCycles = 0;
+    let nextBillingCycleStartDate = new Date(enrollmentDate.getFullYear(), enrollmentDate.getMonth() + 1, 1);
     
-    // Number of full months passed since the start of the month after enrollment
-    let monthsDueCount = 0;
-    let checkDate = new Date(enrollmentDate.getFullYear(), enrollmentDate.getMonth() + 1, 1); // Start of month after enrollment
-    
-    while(checkDate <= currentDate) {
-        monthsDueCount++;
-        checkDate.setMonth(checkDate.getMonth() + 1);
+    while(nextBillingCycleStartDate <= currentDate) {
+        expectedMonthlyPaymentCycles++;
+        nextBillingCycleStartDate.setMonth(nextBillingCycleStartDate.getMonth() + 1);
     }
 
-    const paidMonthlyFeesCount = s.paymentHistory.filter(p => p.type === 'monthly').length;
-    return monthsDueCount > paidMonthlyFeesCount;
+    const actualMonthlyPaymentTransactions = s.paymentHistory.filter(p => p.type === 'monthly').length;
+    return expectedMonthlyPaymentCycles > actualMonthlyPaymentTransactions;
   });
 
   const noDueStudents = filteredStudents.filter(s => 
@@ -334,3 +364,6 @@ export default function BillingPage() {
     </>
   );
 }
+
+
+    
