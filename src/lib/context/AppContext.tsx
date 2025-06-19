@@ -3,13 +3,13 @@
 import type { ReactNode } from 'react';
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { Course, Student, PaymentRecord, StudentFormData, CourseFormData } from '@/lib/types';
-import { db, app as firebaseAppInstance } from '@/lib/firebase'; 
-import { 
-  collection, 
-  getDocs, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
+import { db, app as firebaseAppInstance } from '@/lib/firebase';
+import {
+  collection,
+  getDocs,
+  addDoc,
+  updateDoc,
+  deleteDoc,
   doc,
   Timestamp,
   writeBatch
@@ -21,7 +21,7 @@ interface AppContextType {
   addCourse: (course: CourseFormData) => Promise<void>;
   updateCourse: (course: Course) => Promise<void>;
   deleteCourse: (courseId: string) => Promise<void>;
-  addStudent: (student: StudentFormData) => Promise<void>; 
+  addStudent: (student: StudentFormData) => Promise<void>;
   updateStudent: (studentId: string, studentData: Partial<Omit<Student, 'id' | 'paymentHistory' | 'enrollmentDate'> & { enrollmentDate?: string | Date, paymentHistory?: Omit<PaymentRecord, 'id'>[] | PaymentRecord[] }>) => Promise<void>;
   addPayment: (studentId: string, payment: Omit<PaymentRecord, 'id'>) => Promise<void>;
   deleteStudent: (studentId: string) => Promise<void>;
@@ -47,14 +47,14 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     console.log("AppContext: useEffect triggered for data fetching.");
-    
+
     if (!process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) {
         console.warn("AppContext: NEXT_PUBLIC_FIREBASE_PROJECT_ID is not set. Firebase features might not work as expected if other config values are also missing.");
     }
 
     if (!db) {
       console.error("AppContext: Firestore 'db' instance is not available. Halting data fetch.");
-      setIsLoading(false); 
+      setIsLoading(false);
       return;
     }
     console.log("AppContext: Firestore 'db' instance appears to be available.");
@@ -70,7 +70,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         const courseSnapshot = await getDocs(coursesCollectionRef);
         console.log(`AppContext: Fetched ${courseSnapshot.docs.length} courses.`);
         setCourses(courseSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Course)));
-        
+
         console.log("AppContext: Attempting to fetch students...");
         const studentSnapshot = await getDocs(studentsCollectionRef);
         console.log(`AppContext: Fetched ${studentSnapshot.docs.length} students.`);
@@ -89,7 +89,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const addCourse = async (courseData: CourseFormData) => {
-    if (!db) { 
+    if (!db) {
       console.error("Firestore 'db' not available for addCourse");
       throw new Error("Database not available. Please try again later.");
     }
@@ -109,7 +109,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       throw new Error("Database not available. Please try again later.");
     }
     const courseDocRef = doc(db, 'courses', updatedCourse.id);
-    const { id, ...courseDataToUpdate } = updatedCourse; 
+    const { id, ...courseDataToUpdate } = updatedCourse;
     try {
       await updateDoc(courseDocRef, courseDataToUpdate);
       setCourses((prev) => prev.map(c => c.id === updatedCourse.id ? updatedCourse : c));
@@ -124,7 +124,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       console.error("Firestore 'db' not available for deleteCourse");
       throw new Error("Database not available. Please try again later.");
     }
-    // Check if any student is enrolled in this course
     const isCourseInUse = students.some(student => student.courseId === courseId);
     if (isCourseInUse) {
       throw new Error("Cannot delete course. Students are currently enrolled in it.");
@@ -140,8 +139,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const addStudent = async (studentData: StudentFormData) => { 
-    if (!db) { 
+  const addStudent = async (studentData: StudentFormData) => {
+    if (!db) {
       console.error("Firestore 'db' not available for addStudent");
       throw new Error("Database not available. Please try again later.");
     }
@@ -152,7 +151,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
     const newStudentPayload: Omit<Student, 'id'> = {
       ...restOfStudentData,
-      enrollmentDate: isoEnrollmentDate, 
+      enrollmentDate: isoEnrollmentDate,
       status: 'enrollment_pending',
       paymentHistory: [],
     };
@@ -160,7 +159,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     try {
       const payloadForFirestore = {
         ...newStudentPayload,
-        enrollmentDate: Timestamp.fromDate(new Date(newStudentPayload.enrollmentDate)), 
+        enrollmentDate: Timestamp.fromDate(new Date(newStudentPayload.enrollmentDate)),
       };
       const docRef = await addDoc(studentsCollectionRef, payloadForFirestore);
       setStudents((prev) => [...prev, { ...newStudentPayload, id: docRef.id }]);
@@ -169,18 +168,18 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       throw error;
     }
   };
-  
+
   const updateStudent = async (studentId: string, studentData: Partial<Omit<Student, 'id' | 'paymentHistory' | 'enrollmentDate'> & { enrollmentDate?: string | Date, paymentHistory?: Omit<PaymentRecord, 'id'>[] | PaymentRecord[] }>) => {
     if (!db) {
        console.error("Firestore 'db' not available for updateStudent");
        throw new Error("Database not available. Please try again later.");
     }
     const studentDocRef = doc(db, 'students', studentId);
-    
+
     const payloadForFirestore: Record<string, any> = { ...studentData };
 
     if (studentData.enrollmentDate) {
-      payloadForFirestore.enrollmentDate = studentData.enrollmentDate instanceof Date 
+      payloadForFirestore.enrollmentDate = studentData.enrollmentDate instanceof Date
                                           ? Timestamp.fromDate(studentData.enrollmentDate)
                                           : Timestamp.fromDate(new Date(studentData.enrollmentDate));
     }
@@ -193,10 +192,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
     try {
       await updateDoc(studentDocRef, payloadForFirestore);
-      setStudents((prevStudents) => 
-        prevStudents.map(s => 
-          s.id === studentId 
-          ? mapDocToStudent({ ...s, ...studentData, enrollmentDate: studentData.enrollmentDate ? new Date(studentData.enrollmentDate).toISOString() : s.enrollmentDate, paymentHistory: studentData.paymentHistory ? studentData.paymentHistory.map(p=> ({...p, date: new Date(p.date).toISOString()})) : s.paymentHistory }) 
+      setStudents((prevStudents) =>
+        prevStudents.map(s =>
+          s.id === studentId
+          ? mapDocToStudent({ ...s, ...studentData, enrollmentDate: studentData.enrollmentDate ? new Date(studentData.enrollmentDate).toISOString() : s.enrollmentDate, paymentHistory: studentData.paymentHistory ? studentData.paymentHistory.map(p=> ({...p, date: new Date(p.date).toISOString()})) : s.paymentHistory })
           : s
         )
       );
@@ -205,9 +204,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       throw error;
     }
   };
-  
+
   const addPayment = async (studentId: string, paymentData: Omit<PaymentRecord, 'id'>) => {
-    if (!db) { 
+    if (!db) {
       console.error("Firestore 'db' not available for addPayment");
       throw new Error("Database not available. Please try again later.");
     }
@@ -219,14 +218,14 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
             throw new Error("Student not found to add payment.");
         }
 
-        const newPayment: PaymentRecord = { 
-            ...paymentData, 
-            id: doc(collection(db, '_')).id, 
-            date: paymentData.date, 
+        const newPayment: PaymentRecord = {
+            ...paymentData,
+            id: doc(collection(db, '_')).id,
+            date: paymentData.date,
         };
-        
+
         const updatedPaymentHistory = [...currentStudent.paymentHistory, newPayment];
-        
+
         let newStatus = currentStudent.status;
         if (paymentData.type === 'enrollment' && currentStudent.status === 'enrollment_pending') {
             newStatus = 'active';
@@ -243,9 +242,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         });
 
         setStudents(prevStudents =>
-            prevStudents.map(s => 
-                s.id === studentId 
-                ? { ...s, paymentHistory: updatedPaymentHistory.map(p=> ({...p, date: new Date(p.date).toISOString()})), status: newStatus } 
+            prevStudents.map(s =>
+                s.id === studentId
+                ? { ...s, paymentHistory: updatedPaymentHistory.map(p=> ({...p, date: new Date(p.date).toISOString()})), status: newStatus }
                 : s
             )
         );
@@ -284,17 +283,14 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       let newStatus = student.status;
 
       if (student.status === 'completed_paid' || student.status === 'completed_unpaid') {
-        // Check if enrollment fee was ever paid
         const enrollmentPaid = student.paymentHistory.some(p => p.type === 'enrollment');
         newStatus = enrollmentPaid ? 'active' : 'enrollment_pending';
       } else if (student.status === 'active') {
          const enrollmentPaid = student.paymentHistory.some(p => p.type === 'enrollment');
-         if (!enrollmentPaid) { // Should ideally not happen if active, but good check
+         if (!enrollmentPaid) {
             newStatus = 'enrollment_pending';
          }
       }
-      // 'left' status remains 'left'
-      // 'enrollment_pending' remains as it is
 
       batch.update(studentRef, { paymentHistory: [], status: newStatus });
       updatedStudentsLocally.push({ ...student, paymentHistory: [], status: newStatus });
@@ -302,7 +298,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
     try {
       await batch.commit();
-      setStudents(updatedStudentsLocally.map(mapDocToStudent)); // Re-map to ensure date consistency
+      setStudents(updatedStudentsLocally.map(mapDocToStudent));
     } catch (error: any) {
       console.error("Error clearing payment histories in Firestore:", error);
       throw error;
@@ -310,18 +306,18 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <AppContext.Provider value={{ 
-        courses, 
-        students, 
-        addCourse, 
-        updateCourse, 
-        deleteCourse, 
-        addStudent, 
-        updateStudent, 
+    <AppContext.Provider value={{
+        courses,
+        students,
+        addCourse,
+        updateCourse,
+        deleteCourse,
+        addStudent,
+        updateStudent,
         addPayment,
         deleteStudent,
-        clearAllPaymentHistories, 
-        isLoading 
+        clearAllPaymentHistories,
+        isLoading
     }}>
       {children}
     </AppContext.Provider>
