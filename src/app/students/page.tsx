@@ -2,7 +2,7 @@
 "use client";
 import React, { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
-import { PlusCircle, User, Users, MoreVertical, Trash2, UserMinus, ImageUp, Camera, XCircle, Edit } from 'lucide-react';
+import { PlusCircle, User, Users, MoreVertical, Trash2, UserMinus, ImageUp, Camera, XCircle, Edit, CreditCard } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { 
   Dialog, 
@@ -194,23 +194,18 @@ export default function StudentsPage() {
 
     const { enrollmentDate: enrollmentDateObj, dob: dobObj, ...restOfForm } = studentForm;
     const isoEnrollmentDate = `${enrollmentDateObj.year}-${enrollmentDateObj.month}-${enrollmentDateObj.day}`;
-    const dobForPayload = `${dobObj.year}-${dobObj.month}-${dobObj.day}`;
-
+    
+    // DOB is already an object {day, month, year}, which is what updateStudent expects for its dob field.
+    // For addStudent, StudentFormData is passed directly.
 
     try {
       if (editingStudent) {
         const photoToBeRemoved = photoPreview === null && !!editingStudent.photoUrl && !studentForm.photoFile && !studentForm.photoDataUri;
         
-        // Construct payload for updateStudent, it expects dates as string or Date, not objects.
-        // And other fields as they are defined in Student interface or relevant for update.
-        const updatePayload: Partial<Omit<Student, 'id' | 'paymentHistory'>> & { enrollmentDate?: string; dob?: any; photoFile?: File | null; photoDataUri?: string | null; photoToBeRemoved?: boolean } = {
-          ...restOfForm, // Includes name, fatherName, mobile, aadhar, courseId, courseDurationValue, courseDurationUnit
-          enrollmentDate: isoEnrollmentDate,
-          dob: { // Keep DOB as an object for update if that's how AppContext handles it, or convert
-              day: studentForm.dob.day,
-              month: studentForm.dob.month,
-              year: studentForm.dob.year,
-          },
+        const updatePayload: Partial<Omit<Student, 'id' | 'paymentHistory' | 'enrollmentNumber' | 'enrollmentDate' | 'dob'>> & { enrollmentDate?: string; dob?: {day: string, month: string, year: string }; photoFile?: File | null; photoDataUri?: string | null; photoToBeRemoved?: boolean } = {
+          ...restOfForm, 
+          enrollmentDate: isoEnrollmentDate, // Convert to ISO string for update
+          dob: studentForm.dob, // Keep as is: { day, month, year }
           photoFile: studentForm.photoFile,
           photoDataUri: studentForm.photoDataUri,
           photoToBeRemoved,
@@ -220,7 +215,6 @@ export default function StudentsPage() {
         toast({ title: "Success", description: "Student details updated successfully." });
 
       } else {
-        // For adding a new student, StudentFormData is directly compatible with addStudent context function
         await addStudent(studentForm); 
         toast({ title: "Success", description: "Student added successfully. Enrollment fee pending." });
       }
@@ -269,13 +263,12 @@ export default function StudentsPage() {
     setEditingStudent(student);
     
     const enrollmentDateParts = student.enrollmentDate.split('T')[0].split('-');
-    const dobParts = student.dob ? [String(student.dob.year), String(student.dob.month).padStart(2,'0'), String(student.dob.day).padStart(2,'0')] : null;
-
-
+    // Student.dob is already { day, month, year }
+    
     setStudentForm({
       name: student.name,
       fatherName: student.fatherName,
-      dob: dobParts ? { day: dobParts[2], month: dobParts[1], year: dobParts[0] } : initialStudentFormState.dob,
+      dob: student.dob, // Directly use the object
       mobile: student.mobile,
       aadhar: student.aadhar,
       enrollmentDate: { day: enrollmentDateParts[2], month: enrollmentDateParts[1], year: enrollmentDateParts[0] },
@@ -325,9 +318,17 @@ export default function StudentsPage() {
         setIsStudentFormDialogOpen(isOpen);
         if (!isOpen) {
             handleCloseCamera(); 
-            setEditingStudent(null); // Reset editing state when dialog closes
-            handleRemovePhoto(); // Clear photo preview and form state
-            setStudentForm(initialStudentFormState); // Reset form
+            setEditingStudent(null); 
+            handleRemovePhoto(); 
+            const todayForForm = new Date();
+            setStudentForm({
+              ...initialStudentFormState,
+              enrollmentDate: {
+                day: String(todayForForm.getDate()).padStart(2, '0'),
+                month: String(todayForForm.getMonth() + 1).padStart(2, '0'),
+                year: String(todayForForm.getFullYear()),
+              }
+            });
         }
     }}>
       <DialogContent className="sm:max-w-lg shadow-2xl rounded-lg">
@@ -543,8 +544,7 @@ export default function StudentsPage() {
                            </DropdownMenuItem>
                            <DropdownMenuItem asChild>
                              <Link href="/billing" className="flex items-center w-full cursor-pointer">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 h-4 w-4 lucide lucide-credit-card"><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/></svg>
-                                Manage Fees
+                                <CreditCard className="mr-2 h-4 w-4" /> Manage Fees
                              </Link>
                            </DropdownMenuItem>
                             <DropdownMenuSeparator />
@@ -595,6 +595,7 @@ export default function StudentsPage() {
                   </div>
                 </CardHeader>
                 <CardContent className="flex-grow space-y-2">
+                  <p className="text-sm text-muted-foreground">Enroll. No: <span className="font-semibold text-foreground">{student.enrollmentNumber || 'N/A'}</span></p>
                   <p className="text-sm text-muted-foreground">Course: <span className="font-semibold text-foreground">{course?.name || 'N/A'}</span></p>
                   <p className="text-sm text-muted-foreground">Enrolled: <span className="font-semibold text-foreground">{formattedEnrollmentDate}</span></p>
                   <p className="text-sm text-muted-foreground">Mobile: <span className="font-semibold text-foreground">{student.mobile}</span></p>

@@ -1,7 +1,7 @@
 
 "use client";
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { DollarSign, CheckCircle, AlertCircle, CalendarDays, History, Landmark, MinusCircle, PlusCircle, UserCircle, Search, Users } from 'lucide-react';
+import { DollarSign, CheckCircle, AlertCircle, CalendarDays, History, Landmark, MinusCircle, PlusCircle, UserCircle, Search, Users, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -50,7 +50,8 @@ export default function BillingPage() {
     if (!searchTerm.trim()) return [];
     return activeStudents.filter(student =>
       student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      student.fatherName.toLowerCase().includes(searchTerm.toLowerCase())
+      student.fatherName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (student.enrollmentNumber && student.enrollmentNumber.toLowerCase().includes(searchTerm.toLowerCase()))
     );
   }, [searchTerm, activeStudents]);
 
@@ -92,8 +93,8 @@ export default function BillingPage() {
     const courseDurationInMonths = selectedStudent.courseDurationValue * (selectedStudent.courseDurationUnit === 'years' ? 12 : 1);
     
     const firstBillableMonth = addMonths(startOfMonth(enrollmentDate), 1);
-    const lastBillableMonth = addMonths(firstBillableMonth, courseDurationInMonths - 1);
-    const loopEndDate = addMonths(lastBillableMonth, 1); 
+    const lastPossibleBillableMonth = addMonths(firstBillableMonth, courseDurationInMonths - 1);
+    const loopEndDate = addMonths(lastPossibleBillableMonth, 1); 
 
     let currentProcessingMonth = firstBillableMonth;
 
@@ -274,8 +275,8 @@ export default function BillingPage() {
 
   const handleStudentSelect = (studentId: string) => {
     setSelectedStudentId(studentId);
-    setSearchTerm(''); // Clear search term after selection
-    setSelectedMonthsToPay({}); // Reset selected months
+    setSearchTerm(''); 
+    setSelectedMonthsToPay({}); 
   };
 
 
@@ -291,11 +292,11 @@ export default function BillingPage() {
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
           <Input
-            placeholder="Search students by name or father's name..."
+            placeholder="Search students by name, father's name, or enrollment no..."
             value={searchTerm}
             onChange={(e) => {
               setSearchTerm(e.target.value);
-              if (selectedStudentId) setSelectedStudentId(null); // Clear selected student when searching
+              if (selectedStudentId) setSelectedStudentId(null); 
             }}
             className="pl-10 shadow-md w-full md:w-1/2 lg:w-1/3"
           />
@@ -314,9 +315,9 @@ export default function BillingPage() {
                     onClick={() => handleStudentSelect(student.id)}
                     className="p-3 hover:bg-muted rounded-md cursor-pointer transition-colors"
                   >
-                    <p className="font-medium">{student.name} ({student.fatherName})</p>
+                    <p className="font-medium">{student.name} ({student.enrollmentNumber || 'N/A'})</p>
                     <p className="text-sm text-muted-foreground">
-                      {courses.find(c => c.id === student.courseId)?.name || 'N/A'}
+                      Father: {student.fatherName} | Course: {courses.find(c => c.id === student.courseId)?.name || 'N/A'}
                     </p>
                   </div>
                 ))}
@@ -350,7 +351,6 @@ export default function BillingPage() {
 
       {selectedStudent && selectedStudentCourse && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-slide-in">
-          {/* Left Panel: Payment History */}
           <Card className="lg:col-span-1 shadow-lg">
             <CardHeader>
               <CardTitle className="flex items-center text-primary font-headline"><History className="mr-2 h-5 w-5" />Payment History</CardTitle>
@@ -374,10 +374,9 @@ export default function BillingPage() {
             </CardContent>
           </Card>
 
-          {/* Center Panel: Fee Status & Monthly Checklist */}
           <Card className="lg:col-span-1 shadow-lg">
             <CardHeader>
-              <CardTitle className="font-headline text-primary">{selectedStudent.name}</CardTitle>
+              <CardTitle className="font-headline text-primary">{selectedStudent.name} ({selectedStudent.enrollmentNumber || 'N/A'})</CardTitle>
               <CardDescription>Course: {selectedStudentCourse.name}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -450,7 +449,6 @@ export default function BillingPage() {
             </CardContent>
           </Card>
 
-          {/* Right Panel: Record Ad-hoc Payment */}
           <Card className="lg:col-span-1 shadow-lg">
             <CardHeader>
               <CardTitle className="flex items-center text-primary font-headline"><Landmark className="mr-2 h-5 w-5" />Record Ad-hoc Payment</CardTitle>

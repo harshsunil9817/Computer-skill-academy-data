@@ -1,7 +1,7 @@
 
 "use client";
 import React, { useState, useEffect } from 'react';
-import { Brain, Send, Loader2, UserCheck, AlertTriangle } from 'lucide-react';
+import { Brain, Send, Loader2, UserCheck, AlertTriangle, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
@@ -92,7 +92,7 @@ export default function InterventionPage() {
                   <SelectContent>
                     {students.map((student) => (
                       <SelectItem key={student.id} value={student.id}>
-                        {student.name}
+                        {student.name} ({student.enrollmentNumber || 'N/A'})
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -101,7 +101,7 @@ export default function InterventionPage() {
 
               {selectedStudent && (
                  <Card className="bg-primary/5 p-4 border-primary/20">
-                    <p className="text-sm font-medium text-primary">{selectedStudent.name}</p>
+                    <p className="text-sm font-medium text-primary">{selectedStudent.name} ({selectedStudent.enrollmentNumber || 'N/A'})</p>
                     <p className="text-xs text-muted-foreground">Course: {courses.find(c=>c.id === selectedStudent.courseId)?.name || 'N/A'}</p>
                     <p className="text-xs text-muted-foreground">Enrolled: {new Date(selectedStudent.enrollmentDate).toLocaleDateString()}</p>
                 </Card>
@@ -174,3 +174,4 @@ export default function InterventionPage() {
     </>
   );
 }
+

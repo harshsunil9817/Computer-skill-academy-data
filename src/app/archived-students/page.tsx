@@ -36,7 +36,9 @@ function ArchivedStudentCard({ student, course, onReactivate }: ArchivedStudentC
      <Card className="mb-4 shadow-md hover:shadow-lg transition-shadow flex flex-col">
       <CardHeader>
          <CardTitle className="font-headline text-primary">{student.name}</CardTitle>
-        <CardDescription>Course: {course?.name || 'N/A'} | Status: <span className="font-semibold capitalize">{student.status.replace('_', ' ')}</span></CardDescription>
+        <CardDescription>
+            Enroll. No: {student.enrollmentNumber || 'N/A'} | Course: {course?.name || 'N/A'} | Status: <span className="font-semibold capitalize">{student.status.replace('_', ' ')}</span>
+        </CardDescription>
       </CardHeader>
       <CardContent className="flex-grow">
         <p className="text-sm text-muted-foreground">Enrollment Date: {new Date(student.enrollmentDate).toLocaleDateString()}</p>
@@ -90,7 +92,8 @@ export default function ArchivedStudentsPage() {
   
   const filteredArchivedStudents = archivedStudents.filter(student => 
     student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    student.fatherName.toLowerCase().includes(searchTerm.toLowerCase())
+    student.fatherName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (student.enrollmentNumber && student.enrollmentNumber.toLowerCase().includes(searchTerm.toLowerCase()))
   );
   
   const completedPaidStudents = filteredArchivedStudents.filter(s => s.status === 'completed_paid');
@@ -159,7 +162,7 @@ export default function ArchivedStudentsPage() {
         <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
             <Input 
-                placeholder="Search archived students by name or father's name..."
+                placeholder="Search by name, father's name, or enrollment no..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10"

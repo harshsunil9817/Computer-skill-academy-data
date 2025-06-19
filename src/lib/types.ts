@@ -19,6 +19,7 @@ export interface PaymentRecord {
 
 export interface Student {
   id: string;
+  enrollmentNumber: string; // Added field
   name: string;
   fatherName: string;
   dob: {
@@ -58,3 +59,4 @@ export interface StudentFormData {
   photoFile?: File | null; // For file input
   photoDataUri?: string | null; // For camera capture
 }
+

@@ -24,7 +24,7 @@ interface AppContextType {
   updateCourse: (course: Course) => Promise<void>;
   deleteCourse: (courseId: string) => Promise<void>;
   addStudent: (student: StudentFormData) => Promise<void>;
-  updateStudent: (studentId: string, studentData: Partial<Omit<Student, 'id' | 'paymentHistory' | 'enrollmentDate' | 'dob' >> & { enrollmentDate?: string; dob?: {day: string, month: string, year: string }; photoFile?: File | null; photoDataUri?: string | null; photoToBeRemoved?: boolean }) => Promise<void>;
+  updateStudent: (studentId: string, studentData: Partial<Omit<Student, 'id' | 'paymentHistory' | 'enrollmentDate' | 'dob' | 'enrollmentNumber' >> & { enrollmentDate?: string; dob?: {day: string, month: string, year: string }; photoFile?: File | null; photoDataUri?: string | null; photoToBeRemoved?: boolean }) => Promise<void>;
   addPayment: (studentId: string, payment: Omit<PaymentRecord, 'id'>) => Promise<void>;
   deleteStudent: (studentId: string) => Promise<void>;
   clearAllPaymentHistories: () => Promise<void>;
@@ -35,6 +35,7 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 const mapDocToStudent = (docData: any): Student => ({
   ...docData,
+  enrollmentNumber: docData.enrollmentNumber || 'N/A', // Handle older docs
   enrollmentDate: docData.enrollmentDate instanceof Timestamp ? docData.enrollmentDate.toDate().toISOString() : docData.enrollmentDate,
   dob: docData.dob, // Keep as is from Firestore (should be an object)
   paymentHistory: docData.paymentHistory?.map((p: any) => ({
@@ -200,16 +201,32 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       console.error("Error uploading photo to Appwrite:", uploadError);
     }
 
+    // Generate Enrollment Number
+    const enrollmentYear = studentData.enrollmentDate.year.slice(-2); // Last two digits of the year
+    const studentsInSameYear = students.filter(s => {
+      try {
+        const existingStudentEnrollmentYear = new Date(s.enrollmentDate).getFullYear().toString().slice(-2);
+        return existingStudentEnrollmentYear === enrollmentYear;
+      } catch (e) {
+        return false; // Gracefully handle if date is invalid
+      }
+    });
+    const nextSequenceNumber = studentsInSameYear.length + 1;
+    const enrollmentSequence = String(nextSequenceNumber).padStart(4, '0');
+    const generatedEnrollmentNumber = `CSA${enrollmentYear}${enrollmentSequence}`;
+
+
     const { enrollmentDate: enrollmentDateObj, dob: dobObj, photoFile, photoDataUri, ...restOfStudentData } = studentData;
     const isoEnrollmentDate = `${enrollmentDateObj.year}-${String(enrollmentDateObj.month).padStart(2, '0')}-${String(enrollmentDateObj.day).padStart(2, '0')}`;
     
     const newStudentPayload: Omit<Student, 'id'> = {
       ...restOfStudentData,
+      enrollmentNumber: generatedEnrollmentNumber,
       enrollmentDate: isoEnrollmentDate,
       dob: dobObj, // Store DOB object directly
       status: 'enrollment_pending',
       paymentHistory: [],
-      photoUrl: photoUrlToSave, 
+      photoUrl: photoUrlToSave || undefined, 
     };
 
     try {
@@ -229,7 +246,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const updateStudent = async (
     studentId: string, 
-    updateData: Partial<Omit<Student, 'id' | 'paymentHistory' | 'enrollmentDate' | 'dob' >> & { 
+    updateData: Partial<Omit<Student, 'id' | 'paymentHistory' | 'enrollmentDate' | 'dob' | 'enrollmentNumber'>> & { 
         enrollmentDate?: string; 
         dob?: {day: string, month: string, year: string }; 
         photoFile?: File | null; 
@@ -251,8 +268,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
     let finalPhotoUrl: string | null | undefined = currentStudent.photoUrl;
 
-    // Handle photo update/removal
-    if (updateData.photoFile || updateData.photoDataUri) { // New photo provided
+    if (updateData.photoFile || updateData.photoDataUri) { 
         let fileToUpload: File | null = null;
         if (updateData.photoFile) {
             fileToUpload = updateData.photoFile;
@@ -270,7 +286,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
                 const newPhotoViewUrl = appwriteStorage.getFileView(APPWRITE_STUDENT_PHOTOS_BUCKET_ID, fileUploadResponse.$id);
                 finalPhotoUrl = newPhotoViewUrl.href;
 
-                // Delete old photo if exists
                 if (currentStudent.photoUrl) {
                     const oldFileId = getAppwriteFileIdFromUrl(currentStudent.photoUrl);
                     if (oldFileId) {
@@ -279,10 +294,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
                 }
             } catch (uploadError) {
                 console.error("Error uploading new photo during update:", uploadError);
-                // Decide if you want to proceed without photo update or throw error
             }
         }
-    } else if (updateData.photoToBeRemoved && currentStudent.photoUrl) { // Photo explicitly removed
+    } else if (updateData.photoToBeRemoved && currentStudent.photoUrl) { 
         try {
             const oldFileId = getAppwriteFileIdFromUrl(currentStudent.photoUrl);
             if (oldFileId) {
@@ -301,14 +315,14 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     if (updateData.enrollmentDate) {
       payloadForFirestore.enrollmentDate = Timestamp.fromDate(new Date(updateData.enrollmentDate));
     }
-    if (updateData.dob) { // dob is an object {day, month, year}
+    if (updateData.dob) { 
         payloadForFirestore.dob = updateData.dob;
     }
     
+    // Ensure enrollmentNumber is not accidentally removed or changed if not explicitly part of updateData
+    payloadForFirestore.enrollmentNumber = currentStudent.enrollmentNumber; 
     payloadForFirestore.photoUrl = finalPhotoUrl === undefined ? currentStudent.photoUrl : (finalPhotoUrl === null ? null : finalPhotoUrl);
 
-
-    // Remove undefined fields from payload to avoid Firestore errors
     Object.keys(payloadForFirestore).forEach(key => {
         if (payloadForFirestore[key] === undefined) {
             delete payloadForFirestore[key];
@@ -322,18 +336,16 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         prevStudents.map(s => {
           if (s.id === studentId) {
             const updatedStudentFields = { ...s, ...payloadForFirestore };
-            // Ensure dates are in correct string format for local state if they were Timestamps
             if (payloadForFirestore.enrollmentDate instanceof Timestamp) {
               updatedStudentFields.enrollmentDate = payloadForFirestore.enrollmentDate.toDate().toISOString();
             }
-            // photoUrl is already handled and should be in correct format (string or null)
-            // dob is an object
-            return mapDocToStudent(updatedStudentFields); // Use mapDocToStudent for consistency
+            return mapDocToStudent(updatedStudentFields); 
           }
           return s;
         })
       );
-    } catch (error: any) {
+    } catch (error: any)
+ {
       console.error("Error updating student in Firestore:", error);
       throw error;
     }
@@ -485,3 +497,4 @@ export const useAppContext = () => {
   }
   return context;
 };
+
