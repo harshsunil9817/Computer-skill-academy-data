@@ -5,7 +5,7 @@ import MainLayout from '@/components/layout/MainLayout';
 import { Toaster } from "@/components/ui/toaster";
 
 export const metadata: Metadata = {
-  title: 'AcademyEdge',
+  title: 'Computer Skill Academy Student Data',
   description: 'Manage your computer academy with ease.',
 };
 

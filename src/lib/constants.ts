@@ -1,5 +1,5 @@
 
-export const APP_NAME = "AcademyEdge";
+export const APP_NAME = "Computer Skill Academy Student Data";
 
 export const DOB_DAYS = Array.from({ length: 31 }, (_, i) => (i + 1).toString().padStart(2, '0'));
 export const DOB_MONTHS = [
@@ -24,3 +24,4 @@ export const COURSE_DURATION_UNITS = [
   { value: "months", label: "Months" },
   { value: "years", label: "Years" },
 ];
+
