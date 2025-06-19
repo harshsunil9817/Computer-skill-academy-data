@@ -1,7 +1,7 @@
 
 "use client";
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { DollarSign, CheckCircle, AlertCircle, Search, CalendarDays } from 'lucide-react';
+import { DollarSign, CheckCircle, AlertCircle, Search, CalendarDays, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -28,11 +28,11 @@ interface BillableMonthDetail {
 interface StudentFeeItemProps {
   student: Student;
   course?: Course;
-  totalMonthlyDueForStudent?: number;
+  totalMonthlyDueForStudent?: number; // Only for 'due' type, passed from BillingPage
   onPayEnrollment?: (studentId: string, course: Course) => Promise<void>;
-  onPayFullMonthlyDues?: (studentId: string, courseId: string) => Promise<void>;
-  onPayOldestDueMonth?: (studentId: string, courseId: string, oldestDueMonth: BillableMonthDetail) => Promise<void>;
-  onPayPartialMonthlyDues?: (studentId: string, courseId: string, amount: number) => Promise<void>;
+  onPayFullMonthlyDues?: (student: Student, course: Course) => Promise<void>; // Changed to pass full objects
+  onPayOldestDueMonth?: (student: Student, course: Course, oldestDueMonth: BillableMonthDetail) => Promise<void>; // Changed
+  onPayPartialMonthlyDues?: (student: Student, course: Course, amount: number) => Promise<void>; // Changed
   type: 'enrollment' | 'due' | 'paid';
 }
 
@@ -48,40 +48,46 @@ function StudentFeeItem({
 }: StudentFeeItemProps) {
   const { toast } = useToast();
   const [partialAmount, setPartialAmount] = useState('');
+  const [billableMonths, setBillableMonths] = useState<BillableMonthDetail[]>([]);
   
-  const billableMonths = useMemo(() => {
-    if (!course || student.status !== 'active') {
-      return [];
-    }
-    const months: BillableMonthDetail[] = [];
-    const currentDate = startOfMonth(new Date());
-    const enrollmentDateObj = parseISO(student.enrollmentDate);
-    if (isNaN(enrollmentDateObj.getTime())) return [];
-    
-    const enrollmentDate = startOfMonth(enrollmentDateObj);
-    let currentBillableMonthDate = addMonths(enrollmentDate, 1);
+  useEffect(() => {
+    if (course && student.status === 'active' && type === 'due') {
+      const months: BillableMonthDetail[] = [];
+      const currentDate = startOfMonth(new Date());
+      const enrollmentDateObj = parseISO(student.enrollmentDate);
+      
+      if (isNaN(enrollmentDateObj.getTime())) {
+        setBillableMonths([]);
+        return;
+      }
+      
+      const enrollmentDate = startOfMonth(enrollmentDateObj);
+      let currentBillableMonthDate = addMonths(enrollmentDate, 1);
 
-    while (isBefore(currentBillableMonthDate, currentDate) || isEqual(currentBillableMonthDate, currentDate)) {
-      const monthStr = format(currentBillableMonthDate, "MMMM yyyy");
-      const paymentsForThisMonth = student.paymentHistory.filter(p =>
-        (p.type === 'monthly' || p.type === 'partial') && p.monthFor === monthStr
-      );
-      const amountPaidForThisMonth = paymentsForThisMonth.reduce((sum, p) => sum + p.amount, 0);
-      const remainingDueForThisMonth = Math.max(0, course.monthlyFee - amountPaidForThisMonth);
+      while (isBefore(currentBillableMonthDate, currentDate) || isEqual(currentBillableMonthDate, currentDate)) {
+        const monthStr = format(currentBillableMonthDate, "MMMM yyyy");
+        const paymentsForThisMonth = student.paymentHistory.filter(p =>
+          (p.type === 'monthly' || p.type === 'partial') && p.monthFor === monthStr
+        );
+        const amountPaidForThisMonth = paymentsForThisMonth.reduce((sum, p) => sum + p.amount, 0);
+        const remainingDueForThisMonth = Math.max(0, course.monthlyFee - amountPaidForThisMonth);
 
-      months.push({
-        monthYear: monthStr,
-        dueDate: new Date(currentBillableMonthDate),
-        amountPaidThisMonth: amountPaidForThisMonth,
-        feeForMonth: course.monthlyFee,
-        isFullyPaid: remainingDueForThisMonth <= 0,
-        remainingDue: remainingDueForThisMonth,
-      });
-      currentBillableMonthDate = addMonths(currentBillableMonthDate, 1);
+        months.push({
+          monthYear: monthStr,
+          dueDate: new Date(currentBillableMonthDate),
+          amountPaidThisMonth: amountPaidForThisMonth,
+          feeForMonth: course.monthlyFee,
+          isFullyPaid: remainingDueForThisMonth <= 0,
+          remainingDue: remainingDueForThisMonth,
+        });
+        currentBillableMonthDate = addMonths(currentBillableMonthDate, 1);
+      }
+      months.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
+      setBillableMonths(months);
+    } else {
+      setBillableMonths([]);
     }
-    months.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
-    return months;
-  }, [student, course]);
+  }, [student, course, type]);
 
   const oldestDueMonth = useMemo(() => {
     return billableMonths.find(m => m.remainingDue > 0) || null;
@@ -99,6 +105,7 @@ function StudentFeeItem({
 
   if (type === 'due' && (totalMonthlyDueForStudent === undefined || totalMonthlyDueForStudent <= 0)) return null;
   if (type === 'paid' && (totalMonthlyDueForStudent !== undefined && totalMonthlyDueForStudent > 0)) return null;
+
 
   return (
     <Card className="mb-6 shadow-md hover:shadow-lg transition-shadow">
@@ -138,7 +145,7 @@ function StudentFeeItem({
             <Button
               onClick={() => {
                 if (onPayFullMonthlyDues && course) {
-                  onPayFullMonthlyDues(student.id, course.id);
+                  onPayFullMonthlyDues(student, course);
                 }
               }}
               size="sm"
@@ -151,7 +158,7 @@ function StudentFeeItem({
             {oldestDueMonth && onPayOldestDueMonth && course && (
               <Button
                 onClick={() => {
-                    onPayOldestDueMonth(student.id, course.id, oldestDueMonth);
+                    onPayOldestDueMonth(student, course, oldestDueMonth);
                 }}
                 size="sm"
                 variant="outline"
@@ -179,7 +186,7 @@ function StudentFeeItem({
                   const amount = parseFloat(partialAmount);
                   if (amount > 0 && onPayPartialMonthlyDues && course) {
                      if (amount <= totalMonthlyDueForStudent) { 
-                        onPayPartialMonthlyDues(student.id, course.id, amount);
+                        onPayPartialMonthlyDues(student, course, amount);
                         setPartialAmount('');
                      } else {
                         toast({ title: "Info", description: "Partial amount cannot be greater than total due.", variant: "default"});
@@ -230,14 +237,7 @@ export default function BillingPage() {
     }
   };
 
-  const handlePayFullMonthlyDues = async (studentId: string, courseId: string) => {
-    const student = students.find(s => s.id === studentId);
-    const course = courses.find(c => c.id === courseId);
-
-    if (!student || !course) {
-        toast({ title: "Error", description: "Student or course data not found for full payment.", variant: "destructive" });
-        return;
-    }
+  const handlePayFullMonthlyDues = async (student: Student, course: Course) => {
     const studentName = student.name;
     
     const enrollmentDateObj = parseISO(student.enrollmentDate);
@@ -249,7 +249,7 @@ export default function BillingPage() {
     const monthsToPayNow: BillableMonthDetail[] = [];
     const currentDate = startOfMonth(new Date());
     const enrollmentDate = startOfMonth(enrollmentDateObj);
-    let currentBillableMonthDate = addMonths(enrollmentDate, 1); // Monthly fees start from the month after enrollment
+    let currentBillableMonthDate = addMonths(enrollmentDate, 1); 
 
     while (isBefore(currentBillableMonthDate, currentDate) || isEqual(currentBillableMonthDate, currentDate)) {
         const monthStr = format(currentBillableMonthDate, "MMMM yyyy");
@@ -262,10 +262,10 @@ export default function BillingPage() {
         if (remainingDueForThisMonth > 0) {
             monthsToPayNow.push({
                 monthYear: monthStr,
-                dueDate: new Date(currentBillableMonthDate), // Not strictly needed for this operation but good for consistency
-                amountPaidThisMonth: amountPaidForThisMonth, // For context
-                feeForMonth: course.monthlyFee, // For context
-                isFullyPaid: false, // By definition, if remainingDue > 0
+                dueDate: new Date(currentBillableMonthDate),
+                amountPaidThisMonth: amountPaidForThisMonth, 
+                feeForMonth: course.monthlyFee, 
+                isFullyPaid: false, 
                 remainingDue: remainingDueForThisMonth,
             });
         }
@@ -284,7 +284,7 @@ export default function BillingPage() {
     try {
       for (const month of monthsToPayNow) {
         if (month.remainingDue > 0) {
-          await addPayment(studentId, {
+          await addPayment(student.id, {
             date: new Date().toISOString(),
             amount: month.remainingDue,
             type: 'monthly',
@@ -298,6 +298,7 @@ export default function BillingPage() {
       if (paymentsMadeCount > 0) {
         toast({ title: "Success", description: `Paid ₹${totalAmountPaidThisAction.toLocaleString()} for ${paymentsMadeCount} month(s) for ${studentName}. Dues settled.` });
       } else {
+        // This branch should ideally not be hit if monthsToPayNow.length > 0 initially
         toast({ title: "Info", description: `No outstanding dues were found to pay for ${studentName}.`, variant: "default" });
       }
     } catch (error: any) {
@@ -305,21 +306,14 @@ export default function BillingPage() {
     }
   };
   
-  const handlePayOldestDueMonth = async (studentId: string, courseId: string, oldestDueMonth: BillableMonthDetail) => {
-    const student = students.find(s => s.id === studentId);
-    const course = courses.find(c => c.id === courseId);
-
-    if (!student || !course) {
-      toast({ title: "Error", description: "Student or course data not found.", variant: "destructive" });
-      return;
-    }
+  const handlePayOldestDueMonth = async (student: Student, course: Course, oldestDueMonth: BillableMonthDetail) => {
     if (oldestDueMonth.remainingDue <= 0) {
       toast({ title: "Info", description: `No remaining due for ${oldestDueMonth.monthYear}.`, variant: "default" });
       return;
     }
 
     try {
-      await addPayment(studentId, {
+      await addPayment(student.id, {
         date: new Date().toISOString(),
         amount: oldestDueMonth.remainingDue,
         type: 'monthly',
@@ -332,18 +326,10 @@ export default function BillingPage() {
     }
   };
 
-
-  const handlePayPartialMonthlyDues = async (studentId: string, courseId: string, amount: number) => {
-    const student = students.find(s => s.id === studentId);
-    const course = courses.find(c => c.id === courseId);
-
-    if (!student || !course) {
-        toast({ title: "Error", description: "Student or course data not found for partial payment.", variant: "destructive" });
-        return;
-    }
+  const handlePayPartialMonthlyDues = async (student: Student, course: Course, amount: number) => {
     const studentName = student.name;
-
     let oldestDueMonthRemark = "";
+
     const enrollmentDateObj = parseISO(student.enrollmentDate);
     if (!isNaN(enrollmentDateObj.getTime())) {
         const months: BillableMonthDetail[] = [];
@@ -378,9 +364,8 @@ export default function BillingPage() {
         }
     }
 
-
     try {
-      await addPayment(studentId, {
+      await addPayment(student.id, {
         date: new Date().toISOString(),
         amount: amount,
         type: 'partial',
@@ -388,7 +373,8 @@ export default function BillingPage() {
         remarks: `Partial payment for ${course.name}${oldestDueMonthRemark ? ` (towards ${oldestDueMonthRemark})` : ''}`
       });
       toast({ title: "Success", description: `Partial payment of ₹${amount.toLocaleString()} recorded for ${studentName}.` });
-    } catch (error: any) {
+    } catch (error: any)
+{
       toast({ title: "Error", description: `Failed to process partial payment for ${studentName}: ${error.message}`, variant: "destructive" });
     }
   };
@@ -400,14 +386,14 @@ export default function BillingPage() {
     
     const enrollmentDateObj = parseISO(student.enrollmentDate);
     if (isNaN(enrollmentDateObj.getTime())) {
-      console.warn(`Invalid enrollment date for student ${student.id}: ${student.enrollmentDate}`);
+      console.warn(`Invalid enrollment date for student ${student.id}: ${student.enrollmentDate}. Cannot calculate dues.`);
       return 0; 
     }
 
     let totalDue = 0;
-    const currentDate = startOfMonth(new Date());
+    const currentDate = startOfMonth(new Date()); // Calculate fees up to the start of the current month
     const enrollmentDate = startOfMonth(enrollmentDateObj);
-    let currentBillableMonthDate = addMonths(enrollmentDate, 1);
+    let currentBillableMonthDate = addMonths(enrollmentDate, 1); // Monthly fees start from the month after enrollment
 
     while (isBefore(currentBillableMonthDate, currentDate) || isEqual(currentBillableMonthDate, currentDate)) {
       const monthStr = format(currentBillableMonthDate, "MMMM yyyy");
@@ -423,15 +409,18 @@ export default function BillingPage() {
   }, []);
 
 
-  const filteredStudents = students.filter(student =>
+  const filteredStudents = useMemo(() => students.filter(student =>
     student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (student.fatherName && student.fatherName.toLowerCase().includes(searchTerm.toLowerCase())) ||
     (student.mobile && student.mobile.includes(searchTerm))
-  );
+  ), [students, searchTerm]);
 
-  const enrollmentPendingStudents = filteredStudents.filter(s => s.status === 'enrollment_pending');
+  const enrollmentPendingStudents = useMemo(() => 
+    filteredStudents.filter(s => s.status === 'enrollment_pending')
+  , [filteredStudents]);
 
-  const dueFeeStudentsDetails = filteredStudents
+  const dueFeeStudentsDetails = useMemo(() => {
+    return filteredStudents
     .filter(s => s.status === 'active')
     .map(s => {
         const course = courses.find(c => c.id === s.courseId);
@@ -439,8 +428,10 @@ export default function BillingPage() {
         return { student: s, course, totalMonthlyDue, hasDues: totalMonthlyDue > 0 };
     })
     .filter(details => details.hasDues);
+  }, [filteredStudents, courses, calculateStudentTotalMonthlyDue]);
 
-  const noDueStudentsDetails = filteredStudents
+  const noDueStudentsDetails = useMemo(() => {
+    return filteredStudents
     .filter(s => s.status === 'active')
     .map(s => {
         const course = courses.find(c => c.id === s.courseId);
@@ -448,6 +439,7 @@ export default function BillingPage() {
         return { student: s, course, totalMonthlyDue, hasNoDues: totalMonthlyDue <= 0 };
     })
     .filter(details => details.hasNoDues && !enrollmentPendingStudents.some(es => es.id === details.student.id));
+  }, [filteredStudents, courses, calculateStudentTotalMonthlyDue, enrollmentPendingStudents]);
 
 
   if (isLoading) {
@@ -459,15 +451,21 @@ export default function BillingPage() {
       type: 'enrollment' | 'due' | 'paid'
     ) => {
     if (list.length === 0) {
+      const iconMap = {
+        enrollment: <AlertCircle className="h-10 w-10 text-primary" />,
+        due: <CalendarDays className="h-10 w-10 text-primary" />,
+        paid: <CheckCircle className="h-10 w-10 text-primary" />,
+      };
       return (
         <Card className="text-center py-8 shadow-md">
           <CardContent>
             <div className="mx-auto bg-primary/10 p-3 rounded-full w-fit mb-3">
-              {type === 'enrollment' && <AlertCircle className="h-10 w-10 text-primary" />}
-              {type === 'due' && <CalendarDays className="h-10 w-10 text-primary" />}
-              {type === 'paid' && <CheckCircle className="h-10 w-10 text-primary" />}
+              {iconMap[type]}
             </div>
             <p className="text-muted-foreground">No students in this category {searchTerm && 'matching your search'}.</p>
+            {type === 'due' && !searchTerm && (
+              <p className="text-sm text-muted-foreground mt-2">All active students have cleared their monthly dues.</p>
+            )}
           </CardContent>
         </Card>
       );
@@ -479,7 +477,7 @@ export default function BillingPage() {
             key={item.student.id}
             student={item.student}
             course={item.course}
-            totalMonthlyDueForStudent={item.totalMonthlyDue}
+            totalMonthlyDueForStudent={item.totalMonthlyDue} // Pass this for 'due' type
             onPayEnrollment={type === 'enrollment' ? handlePayEnrollment : undefined}
             onPayFullMonthlyDues={type === 'due' ? handlePayFullMonthlyDues : undefined}
             onPayOldestDueMonth={type === 'due' ? handlePayOldestDueMonth : undefined}
