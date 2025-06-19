@@ -58,8 +58,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
       } catch (error) {
         console.error("Failed to load data from Firestore", error);
+      } finally {
+        setIsLoading(false);
       }
-      setIsLoading(false);
     };
     fetchData();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -146,7 +147,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
         const newPayment: PaymentRecord = { 
             ...paymentData, 
-            id: doc(collection(db, '_')).id, // Generates a local unique ID for the payment record
+            id: doc(collection(db, '_')).id, 
             date: paymentData.date, 
         };
         
