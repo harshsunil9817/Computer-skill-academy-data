@@ -34,6 +34,7 @@ export interface Student {
   courseDurationUnit: 'months' | 'years';
   status: StudentStatus;
   paymentHistory: PaymentRecord[];
+  photoUrl?: string; // URL of the photo stored in Appwrite
   // For GenAI intervention suggestion - can be optional or fetched/input separately
   attendancePercentage?: number;
   grades?: string; // Could be a more structured object like { subject: grade }
@@ -53,4 +54,7 @@ export interface StudentFormData {
   courseId: string;
   courseDurationValue: number;
   courseDurationUnit: 'months' | 'years';
+  photoUrl?: string; // For potential future use if editing photo URL directly
+  photoFile?: File | null; // For file input
+  photoDataUri?: string | null; // For camera capture
 }

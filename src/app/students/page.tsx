@@ -1,7 +1,8 @@
 
 "use client";
-import React, { useState, useEffect } from 'react';
-import { PlusCircle, User, Users, MoreVertical, CreditCard, History, DollarSign, CalendarCheck2, CheckCircle, Trash2, UserMinus } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import Image from 'next/image';
+import { PlusCircle, User, Users, MoreVertical, CreditCard, History, DollarSign, CalendarCheck2, CheckCircle, Trash2, UserMinus, ImageUp, Camera, XCircle } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { 
   Dialog, 
@@ -31,15 +32,17 @@ import { useAppContext } from '@/lib/context/AppContext';
 import type { Student, StudentFormData, Course, PaymentRecord } from '@/lib/types';
 import { DateOfBirthPicker } from '@/components/students/DateOfBirthPicker';
 import { EnrollmentDateDropdownPicker } from '@/components/students/EnrollmentDateDropdownPicker';
-import { DOB_DAYS, DOB_MONTHS, DOB_YEARS, COURSE_DURATION_UNITS, MOBILE_REGEX, AADHAR_REGEX, ENROLLMENT_YEARS } from '@/lib/constants';
+import { DOB_DAYS, DOB_MONTHS, DOB_YEARS, COURSE_DURATION_UNITS, MOBILE_REGEX, AADHAR_REGEX } from '@/lib/constants';
 import { useToast } from '@/hooks/use-toast';
-import { format, addMonths, isBefore, isEqual, startOfMonth, parse } from 'date-fns';
+import { format, addMonths, isBefore, isEqual, startOfMonth } from 'date-fns';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import Link from 'next/link';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Alert, AlertDescription as UIDescription } from "@/components/ui/alert"; // Renamed to UIDescription to avoid conflict
 import { cn } from '@/lib/utils';
 
 
@@ -58,6 +61,8 @@ const initialStudentFormState: StudentFormData = {
   courseId: '',
   courseDurationValue: 1,
   courseDurationUnit: 'months',
+  photoFile: null,
+  photoDataUri: null,
 };
 
 type PaymentType = 'enrollment' | 'monthly' | 'partial';
@@ -95,6 +100,15 @@ export default function StudentsPage() {
   const [selectedMonthsToPayInDialog, setSelectedMonthsToPayInDialog] = useState<Record<string, boolean>>({});
 
   const studentCourseForPayment = recordingPaymentForStudent ? courses.find(c => c.id === recordingPaymentForStudent.courseId) : null;
+
+  // Photo state for Add Student Dialog
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
 
   useEffect(() => {
     if (studentForm.courseId && courses.length > 0) {
@@ -162,6 +176,40 @@ export default function StudentsPage() {
     }
   }, [recordingPaymentForStudent, studentCourseForPayment]);
 
+  // Camera Effect
+  useEffect(() => {
+    if (isCameraOpen) {
+      const getCameraPermission = async () => {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+          setHasCameraPermission(true);
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+          }
+        } catch (error) {
+          console.error('Error accessing camera:', error);
+          setHasCameraPermission(false);
+          toast({
+            variant: 'destructive',
+            title: 'Camera Access Denied',
+            description: 'Please enable camera permissions in your browser settings.',
+          });
+          setIsCameraOpen(false); // Close camera if permission denied
+        }
+      };
+      getCameraPermission();
+    } else {
+      // Cleanup: Stop video stream when camera is closed
+      if (videoRef.current && videoRef.current.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach(track => track.stop());
+        videoRef.current.srcObject = null;
+      }
+      setHasCameraPermission(null); // Reset permission status
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCameraOpen]);
+
 
   const handleStudentFormInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -179,6 +227,43 @@ export default function StudentsPage() {
   const handleEnrollmentDateObjChange = (dateObj: { day: string; month: string; year: string }) => { 
     setStudentForm(prev => ({ ...prev, enrollmentDate: dateObj }));
   };
+
+  const handlePhotoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setStudentForm(prev => ({ ...prev, photoFile: file, photoDataUri: null }));
+      setPhotoPreview(URL.createObjectURL(file));
+    }
+  };
+
+  const handleOpenCamera = () => setIsCameraOpen(true);
+  const handleCloseCamera = () => setIsCameraOpen(false);
+
+  const handleCapturePhoto = () => {
+    if (videoRef.current && canvasRef.current) {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const context = canvas.getContext('2d');
+      if (context) {
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const dataUri = canvas.toDataURL('image/png');
+        setStudentForm(prev => ({ ...prev, photoDataUri: dataUri, photoFile: null }));
+        setPhotoPreview(dataUri);
+      }
+      handleCloseCamera(); // Close camera after capture
+    }
+  };
+
+  const handleRemovePhoto = () => {
+    setStudentForm(prev => ({ ...prev, photoFile: null, photoDataUri: null }));
+    setPhotoPreview(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ""; // Reset file input
+    }
+  };
+
 
   const handleAddStudentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -209,6 +294,7 @@ export default function StudentsPage() {
         }
       });
       setSelectedCourseDetails(null);
+      handleRemovePhoto(); // Clear photo form state
     } catch (error: any) {
       console.error("Student operation failed:", error);
       toast({
@@ -231,6 +317,8 @@ export default function StudentsPage() {
         }
       });
     setSelectedCourseDetails(null);
+    handleRemovePhoto(); // Clear photo state when opening dialog
+    setIsCameraOpen(false); // Ensure camera is closed
     setIsAddStudentDialogOpen(true);
   };
 
@@ -348,7 +436,7 @@ export default function StudentsPage() {
 
   const handleDeleteStudent = async (studentId: string) => {
     try {
-      await deleteStudent(studentId);
+      await deleteStudent(studentId); // This will also need to handle Appwrite photo deletion eventually
       toast({ title: "Success", description: "Student deleted successfully." });
     } catch (error: any) {
       toast({ title: "Error", description: `Failed to delete student: ${error.message}`, variant: "destructive" });
@@ -368,7 +456,12 @@ export default function StudentsPage() {
   );
   
   const renderStudentDialog = () => (
-    <Dialog open={isAddStudentDialogOpen} onOpenChange={setIsAddStudentDialogOpen}>
+    <Dialog open={isAddStudentDialogOpen} onOpenChange={(isOpen) => {
+        setIsAddStudentDialogOpen(isOpen);
+        if (!isOpen) {
+            handleCloseCamera(); // Ensure camera is off when dialog closes
+        }
+    }}>
       <DialogContent className="sm:max-w-lg shadow-2xl rounded-lg">
         <DialogHeader>
           <DialogTitle className="font-headline text-primary">{editingStudent ? 'Edit Student' : 'Add New Student'}</DialogTitle>
@@ -376,6 +469,7 @@ export default function StudentsPage() {
         <ScrollArea className="max-h-[70vh]">
         <form onSubmit={handleAddStudentSubmit} className="p-1 pr-4">
           <div className="grid gap-4 py-4">
+            {/* Student Info Fields */}
             <div className="space-y-1">
               <Label htmlFor="name">Student Name</Label>
               <Input id="name" name="name" value={studentForm.name} onChange={handleStudentFormInputChange} required />
@@ -396,6 +490,68 @@ export default function StudentsPage() {
               <Label htmlFor="aadhar">Aadhar Number (12 digits)</Label>
               <Input id="aadhar" name="aadhar" type="text" value={studentForm.aadhar} onChange={handleStudentFormInputChange} maxLength={12} pattern="\d{12}" required />
             </div>
+            
+            {/* Photo Section */}
+            <div className="space-y-2 border p-4 rounded-md">
+                <Label className="text-base font-medium">Student Photo</Label>
+                {photoPreview && (
+                    <div className="my-2 relative w-32 h-32 mx-auto rounded-md overflow-hidden shadow-md">
+                        <Image src={photoPreview} alt="Student photo preview" layout="fill" objectFit="cover" />
+                        <Button 
+                            variant="destructive" 
+                            size="icon" 
+                            className="absolute top-1 right-1 h-6 w-6"
+                            onClick={handleRemovePhoto}
+                            type="button"
+                        >
+                            <XCircle className="h-4 w-4" />
+                        </Button>
+                    </div>
+                )}
+                <Tabs defaultValue="upload" className="w-full">
+                    <TabsList className="grid w-full grid-cols-2">
+                        <TabsTrigger value="upload"><ImageUp className="mr-2 h-4 w-4" />Upload Photo</TabsTrigger>
+                        <TabsTrigger value="camera"><Camera className="mr-2 h-4 w-4" />Use Camera</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="upload" className="mt-4">
+                        <Input 
+                            id="photoFile" 
+                            name="photoFile" 
+                            type="file" 
+                            accept="image/*" 
+                            onChange={handlePhotoFileChange} 
+                            ref={fileInputRef}
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">Upload a JPG, PNG, or GIF file.</p>
+                    </TabsContent>
+                    <TabsContent value="camera" className="mt-4 space-y-3">
+                        {isCameraOpen ? (
+                            <div className="space-y-2">
+                                <video ref={videoRef} className="w-full aspect-video rounded-md bg-muted" autoPlay muted playsInline />
+                                <canvas ref={canvasRef} className="hidden" />
+                                {hasCameraPermission === false && (
+                                    <Alert variant="destructive">
+                                      <UIDescription>Camera access denied. Please enable permissions in your browser settings.</UIDescription>
+                                    </Alert>
+                                )}
+                                <div className="flex gap-2">
+                                    <Button type="button" onClick={handleCapturePhoto} disabled={!hasCameraPermission}>
+                                        <Camera className="mr-2 h-4 w-4" /> Capture
+                                    </Button>
+                                    <Button type="button" variant="outline" onClick={handleCloseCamera}>Close Camera</Button>
+                                </div>
+                            </div>
+                        ) : (
+                            <Button type="button" onClick={handleOpenCamera} className="w-full">
+                                <Camera className="mr-2 h-4 w-4" /> Open Camera
+                            </Button>
+                        )}
+                    </TabsContent>
+                </Tabs>
+            </div>
+
+
+            {/* Course and Enrollment Fields */}
             <div className="space-y-1">
               <Label htmlFor="enrollmentDate">Enrollment Date</Label>
               <EnrollmentDateDropdownPicker id="enrollmentDate" value={studentForm.enrollmentDate} onChange={handleEnrollmentDateObjChange} />
@@ -701,11 +857,17 @@ export default function StudentsPage() {
             return (
               <Card key={student.id} className="flex flex-col shadow-lg hover:shadow-xl transition-shadow duration-300">
                 <CardHeader>
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-start justify-between">
                     <div className="flex items-center space-x-3">
-                        <div className="bg-primary/20 text-primary p-3 rounded-full">
-                            <User className="h-6 w-6" />
-                        </div>
+                        {student.photoUrl ? (
+                            <div className="relative w-16 h-16 rounded-full overflow-hidden shadow-md">
+                                <Image src={student.photoUrl} alt={student.name} layout="fill" objectFit="cover" />
+                            </div>
+                        ) : (
+                            <div className="relative w-16 h-16 rounded-full overflow-hidden shadow-md bg-muted flex items-center justify-center">
+                                <Image src="https://placehold.co/100x100.png" alt="Placeholder" layout="fill" objectFit="cover" data-ai-hint="avatar person" />
+                            </div>
+                        )}
                         <div>
                             <CardTitle className="font-headline text-primary">{student.name}</CardTitle>
                             <CardDescription>Father: {student.fatherName}</CardDescription>
@@ -794,4 +956,3 @@ export default function StudentsPage() {
     </>
   );
 }
-
