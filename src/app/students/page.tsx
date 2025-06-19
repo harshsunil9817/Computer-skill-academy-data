@@ -12,7 +12,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { useAppContext } from '@/lib/context/AppContext';
 import type { Student, StudentFormData, Course, PaymentRecord } from '@/lib/types';
 import { DateOfBirthPicker } from '@/components/students/DateOfBirthPicker';
-import { EnrollmentDateDropdownPicker } from '@/components/students/EnrollmentDateDropdownPicker'; // Import new component
+import { EnrollmentDateDropdownPicker } from '@/components/students/EnrollmentDateDropdownPicker';
 import { DOB_DAYS, DOB_MONTHS, DOB_YEARS, COURSE_DURATION_UNITS, MOBILE_REGEX, AADHAR_REGEX } from '@/lib/constants';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
@@ -29,9 +29,9 @@ const initialStudentFormState: StudentFormData = {
   dob: { day: DOB_DAYS[0], month: DOB_MONTHS[0].value, year: DOB_YEARS[0] },
   mobile: '',
   aadhar: '',
-  enrollmentDate: { // Updated to object for dropdowns
+  enrollmentDate: { 
     day: String(today.getDate()).padStart(2, '0'),
-    month: String(today.getMonth() + 1).padStart(2, '0'), // Month is 0-indexed in JS Date
+    month: String(today.getMonth() + 1).padStart(2, '0'), 
     year: String(today.getFullYear()),
   },
   courseId: '',
@@ -44,15 +44,15 @@ type PaymentType = 'enrollment' | 'monthly' | 'partial';
 const initialPaymentFormState = {
   type: 'monthly' as PaymentType,
   amount: 0,
-  monthFor: '',
+  monthFor: format(new Date(), "MMMM yyyy"), // Default to current month and year
   remarks: '',
 };
 
 export default function StudentsPage() {
-  const { students, courses, addStudent, isLoading, addPayment } = useAppContext();
+  const { students, courses, addStudent, isLoading, addPayment, updateStudent } = useAppContext();
   const [isAddStudentDialogOpen, setIsAddStudentDialogOpen] = useState(false);
   const [studentForm, setStudentForm] = useState<StudentFormData>(initialStudentFormState);
-  const [editingStudent, setEditingStudent] = useState<Student | null>(null);
+  const [editingStudent, setEditingStudent] = useState<Student | null>(null); // Not used yet, but for future edit functionality
   const [selectedCourseDetails, setSelectedCourseDetails] = useState<{enrollmentFee: number, monthlyFee: number} | null>(null);
   const { toast } = useToast();
 
@@ -79,21 +79,19 @@ export default function StudentsPage() {
   useEffect(() => {
     if (recordingPaymentForStudent && studentCourseForPayment) {
       if (recordingPaymentForStudent.status === 'enrollment_pending') {
-        setPaymentForm(prev => ({
-          ...prev,
+        setPaymentForm({
           type: 'enrollment',
           amount: studentCourseForPayment.enrollmentFee,
           monthFor: '', 
           remarks: `Enrollment fee for ${studentCourseForPayment.name}`,
-        }));
+        });
       } else {
-         setPaymentForm(prev => ({
-          ...prev,
+         setPaymentForm({ // Default to monthly for active students
           type: 'monthly', 
-          amount: studentCourseForPayment.monthlyFee,
-          monthFor: format(new Date(), "MMMM yyyy"),
+          amount: studentCourseForPayment.monthlyFee, // Default to full monthly fee
+          monthFor: format(new Date(), "MMMM yyyy"), // Default to current month
           remarks: `Monthly fee for ${studentCourseForPayment.name}`,
-        }));
+        });
       }
     } else {
       setPaymentForm(initialPaymentFormState);
@@ -113,7 +111,7 @@ export default function StudentsPage() {
     setStudentForm(prev => ({ ...prev, dob }));
   };
 
-  const handleEnrollmentDateObjChange = (dateObj: { day: string; month: string; year: string }) => { // New handler for object
+  const handleEnrollmentDateObjChange = (dateObj: { day: string; month: string; year: string }) => { 
     setStudentForm(prev => ({ ...prev, enrollmentDate: dateObj }));
   };
 
@@ -150,7 +148,7 @@ export default function StudentsPage() {
       console.error("Student operation failed:", error);
       toast({
         title: "Operation Failed",
-        description: error.message || "Could not save student. Please check security rules or console for details.",
+        description: error.message || "Could not save student. Check permissions or console.",
         variant: "destructive",
       });
     }
@@ -177,42 +175,29 @@ export default function StudentsPage() {
 
   const openRecordPaymentDialog = (student: Student) => {
     setRecordingPaymentForStudent(student);
-    const course = courses.find(c => c.id === student.courseId);
-    if (student.status === 'enrollment_pending' && course) {
-      setPaymentForm({
-        type: 'enrollment',
-        amount: course.enrollmentFee,
-        monthFor: '',
-        remarks: `Enrollment fee for ${course.name}`,
-      });
-    } else if (course) {
-      setPaymentForm({
-        type: 'monthly',
-        amount: course.monthlyFee,
-        monthFor: format(new Date(), "MMMM yyyy"),
-        remarks: `Monthly fee for ${course.name}`,
-      });
-    } else {
-      setPaymentForm(initialPaymentFormState);
-    }
+    // useEffect will set paymentForm based on student status
     setIsRecordPaymentDialogOpen(true);
   };
   
   const handlePaymentFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     let newAmount = paymentForm.amount;
+
     if (name === 'type') {
         const newType = value as PaymentType;
         if (newType === 'enrollment' && studentCourseForPayment && recordingPaymentForStudent?.status === 'enrollment_pending') {
             newAmount = studentCourseForPayment.enrollmentFee;
-        } else if ((newType === 'monthly' || newType === 'partial') && studentCourseForPayment) {
-             newAmount = paymentForm.amount > 0 && paymentForm.type === newType ? paymentForm.amount : studentCourseForPayment.monthlyFee;
+        } else if (newType === 'monthly' && studentCourseForPayment) {
+             newAmount = studentCourseForPayment.monthlyFee; // Default to full monthly for 'monthly'
+        } else if (newType === 'partial' && studentCourseForPayment) {
+            // For partial, keep existing amount or clear it if user is expected to type
+            newAmount = paymentForm.amount > 0 && paymentForm.type === 'partial' ? paymentForm.amount : 0; 
         }
-         setPaymentForm(prev => ({ ...prev, type: newType, amount: newAmount }));
+         setPaymentForm(prev => ({ ...prev, type: newType, amount: newAmount, monthFor: newType === 'enrollment' ? '' : prev.monthFor || format(new Date(), "MMMM yyyy") }));
     } else if (name === 'amount') {
         setPaymentForm(prev => ({ ...prev, amount: parseFloat(value) || 0 }));
     }
-     else {
+     else { // For monthFor and remarks
         setPaymentForm(prev => ({ ...prev, [name]: value }));
     }
   };
@@ -228,16 +213,22 @@ export default function StudentsPage() {
       return;
     }
     if ((paymentForm.type === 'monthly' || paymentForm.type === 'partial') && !paymentForm.monthFor.trim()) {
-      toast({ title: "Error", description: "Please specify 'Month For' for monthly/partial payments.", variant: "destructive" });
+      toast({ title: "Error", description: "Please specify 'Month For' (e.g., July 2024) for monthly/partial payments.", variant: "destructive" });
       return;
     }
+    // Validate monthFor format (simple check)
+    if ((paymentForm.type === 'monthly' || paymentForm.type === 'partial') && !/^[A-Za-z]+ [0-9]{4}$/.test(paymentForm.monthFor.trim())) {
+        toast({ title: "Error", description: "Invalid 'Month For' format. Expected 'Month Year' (e.g., July 2024).", variant: "destructive" });
+        return;
+    }
+
 
     const paymentDetails: Omit<PaymentRecord, 'id'> = {
       date: new Date().toISOString(),
       amount: paymentForm.amount,
       type: paymentForm.type,
-      monthFor: (paymentForm.type === 'monthly' || paymentForm.type === 'partial') ? paymentForm.monthFor : undefined,
-      remarks: paymentForm.remarks || `${paymentForm.type} fee for ${studentCourseForPayment.name}${paymentForm.monthFor ? ` for ${paymentForm.monthFor}` : ''}`,
+      monthFor: (paymentForm.type === 'monthly' || paymentForm.type === 'partial') ? paymentForm.monthFor.trim() : undefined,
+      remarks: paymentForm.remarks || `${paymentForm.type} fee for ${studentCourseForPayment.name}${paymentForm.monthFor ? ` for ${paymentForm.monthFor.trim()}` : ''}`,
     };
 
     try {
@@ -358,6 +349,7 @@ export default function StudentsPage() {
                   <TableHead>Date</TableHead>
                   <TableHead>Amount (₹)</TableHead>
                   <TableHead>Type</TableHead>
+                  <TableHead>Month For</TableHead>
                   <TableHead>Remarks</TableHead>
                 </TableRow>
               </TableHeader>
@@ -366,7 +358,8 @@ export default function StudentsPage() {
                   <TableRow key={payment.id}>
                     <TableCell>{new Date(payment.date).toLocaleDateString()}</TableCell>
                     <TableCell>{payment.amount.toLocaleString()}</TableCell>
-                    <TableCell className="capitalize">{payment.type} {payment.monthFor && `(${payment.monthFor})`}</TableCell>
+                    <TableCell className="capitalize">{payment.type}</TableCell>
+                    <TableCell>{payment.monthFor || 'N/A'}</TableCell>
                     <TableCell>{payment.remarks}</TableCell>
                   </TableRow>
                 ))}
@@ -410,8 +403,12 @@ export default function StudentsPage() {
                                 {recordingPaymentForStudent.status === 'enrollment_pending' && (
                                     <SelectItem value="enrollment">Enrollment Fee</SelectItem>
                                 )}
-                                <SelectItem value="monthly">Monthly Fee</SelectItem>
-                                <SelectItem value="partial">Partial Fee</SelectItem>
+                                {(recordingPaymentForStudent.status === 'active' || recordingPaymentForStudent.status === 'completed_unpaid') && (
+                                  <>
+                                    <SelectItem value="monthly">Monthly Fee</SelectItem>
+                                    <SelectItem value="partial">Partial Fee</SelectItem>
+                                  </>
+                                )}
                             </SelectContent>
                         </Select>
                     </div>
@@ -437,7 +434,7 @@ export default function StudentsPage() {
                                 value={paymentForm.monthFor} 
                                 onChange={handlePaymentFormChange}
                                 placeholder="MMMM YYYY" 
-                                required 
+                                required={paymentForm.type === 'monthly' || paymentForm.type === 'partial'}
                             />
                         </div>
                     )}
@@ -473,7 +470,7 @@ export default function StudentsPage() {
     );
   }
 
-  if (students.length === 0 && !isLoading) {
+  if (students.filter(s => s.status === 'active' || s.status === 'enrollment_pending' || s.status === 'completed_unpaid').length === 0 && !isLoading) {
     return (
       <>
         {pageHeader}
@@ -482,7 +479,7 @@ export default function StudentsPage() {
             <div className="mx-auto bg-primary/10 p-3 rounded-full w-fit">
                 <Users className="h-12 w-12 text-primary" />
             </div>
-            <CardTitle className="mt-4 text-2xl font-headline">No Students Enrolled</CardTitle>
+            <CardTitle className="mt-4 text-2xl font-headline">No Active Students Enrolled</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-muted-foreground">Add your first student to get started.</p>
@@ -492,6 +489,8 @@ export default function StudentsPage() {
           </CardContent>
         </Card>
         {renderStudentDialog()}
+        {renderPaymentHistoryDialog()}
+        {renderRecordPaymentDialog()}
       </>
     );
   }
@@ -501,7 +500,7 @@ export default function StudentsPage() {
       {pageHeader}
       <ScrollArea className="h-[calc(100vh-20rem)]">
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 animate-slide-in">
-          {students.map((student) => {
+          {students.filter(s => s.status === 'active' || s.status === 'enrollment_pending' || s.status === 'completed_unpaid').map((student) => {
             const course = courses.find(c => c.id === student.courseId);
             const enrollmentDateObj = new Date(student.enrollmentDate);
             const formattedEnrollmentDate = !isNaN(enrollmentDateObj.getTime()) ? enrollmentDateObj.toLocaleDateString() : 'N/A';
@@ -527,14 +526,14 @@ export default function StudentsPage() {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                            <DropdownMenuItem asChild>
-                             <Link href="/billing" className="flex items-center w-full">
+                             <Link href="/billing" className="flex items-center w-full cursor-pointer">
                                 <CreditCard className="mr-2 h-4 w-4" /> Go to Billing
                              </Link>
                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => openPaymentHistoryDialog(student)}>
+                            <DropdownMenuItem onClick={() => openPaymentHistoryDialog(student)} className="cursor-pointer">
                                 <History className="mr-2 h-4 w-4" /> Payment History
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => openRecordPaymentDialog(student)}>
+                            <DropdownMenuItem onClick={() => openRecordPaymentDialog(student)} className="cursor-pointer">
                                 <DollarSign className="mr-2 h-4 w-4" /> Record Payment
                             </DropdownMenuItem>
                         </DropdownMenuContent>
