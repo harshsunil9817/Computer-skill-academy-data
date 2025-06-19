@@ -1,7 +1,7 @@
 
 "use client";
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { DollarSign, CheckCircle, AlertCircle, CalendarDays, History, Landmark, MinusCircle, PlusCircle, UserCircle } from 'lucide-react';
+import { DollarSign, CheckCircle, AlertCircle, CalendarDays, History, Landmark, MinusCircle, PlusCircle, UserCircle, Search, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -33,6 +33,7 @@ export default function BillingPage() {
   const { students, courses, addPayment, isLoading: isAppContextLoading } = useAppContext();
   const { toast } = useToast();
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
   
   const [adhocPaymentAmount, setAdhocPaymentAmount] = useState<number | string>('');
   const [adhocPaymentType, setAdhocPaymentType] = useState<AdhocPaymentType>('settle_dues');
@@ -44,6 +45,14 @@ export default function BillingPage() {
   const activeStudents = useMemo(() => 
     students.filter(s => s.status === 'active' || s.status === 'enrollment_pending' || s.status === 'completed_unpaid'),
   [students]);
+
+  const searchedStudents = useMemo(() => {
+    if (!searchTerm.trim()) return [];
+    return activeStudents.filter(student =>
+      student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      student.fatherName.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }, [searchTerm, activeStudents]);
 
   const selectedStudent = useMemo(() => {
     if (!selectedStudentId) return null;
@@ -80,16 +89,11 @@ export default function BillingPage() {
     const enrollmentDate = parseISO(selectedStudent.enrollmentDate);
     if (isNaN(enrollmentDate.getTime())) return [];
 
-    // Calculate course duration in months
     const courseDurationInMonths = selectedStudent.courseDurationValue * (selectedStudent.courseDurationUnit === 'years' ? 12 : 1);
     
-    // Determine the course end date for fee calculation purposes
-    // Fees start the month *after* enrollment and continue for the duration of the course.
-    // So, if a 3-month course enrolls in Jan, fees are for Feb, Mar, Apr.
-    // The loop should go up to and include the last billable month.
     const firstBillableMonth = addMonths(startOfMonth(enrollmentDate), 1);
     const lastBillableMonth = addMonths(firstBillableMonth, courseDurationInMonths - 1);
-    const loopEndDate = addMonths(lastBillableMonth, 1); // Loop until the month *after* the last billable month
+    const loopEndDate = addMonths(lastBillableMonth, 1); 
 
     let currentProcessingMonth = firstBillableMonth;
 
@@ -107,7 +111,7 @@ export default function BillingPage() {
         feeForMonth: selectedStudentCourse.monthlyFee,
         paidForMonth: paymentsForThisMonth,
         remainingDue: remainingDueForMonth,
-        isCoveredByAdvance: false, // This will be updated later by advance balance logic
+        isCoveredByAdvance: false, 
         isFullyPaid: remainingDueForMonth <= 0,
       });
       currentProcessingMonth = addMonths(currentProcessingMonth, 1);
@@ -149,7 +153,7 @@ export default function BillingPage() {
             const amountToCover = Math.min(_effectiveAdvanceBalance, newRemainingDue);
             newRemainingDue -= amountToCover;
             _effectiveAdvanceBalance -= amountToCover;
-            coveredByAdvance = newRemainingDue <= 0; // Mark as covered if advance paid it off
+            coveredByAdvance = newRemainingDue <= 0; 
         }
         
         if(isBefore(month.monthDate, addMonths(startOfMonth(new Date()),1))) {
@@ -268,6 +272,12 @@ export default function BillingPage() {
     }
   };
 
+  const handleStudentSelect = (studentId: string) => {
+    setSelectedStudentId(studentId);
+    setSearchTerm(''); // Clear search term after selection
+    setSelectedMonthsToPay({}); // Reset selected months
+  };
+
 
   if (isAppContextLoading) {
     return <div className="text-center py-10">Loading billing data...</div>;
@@ -277,33 +287,63 @@ export default function BillingPage() {
     <>
       <PageHeader title="Student Fee Management" description="Manage individual student payments and dues." />
       
-      <div className="mb-6">
-        <Select onValueChange={(value) => {setSelectedStudentId(value); setSelectedMonthsToPay({});}} value={selectedStudentId || ''}>
-          <SelectTrigger className="w-full md:w-1/2 lg:w-1/3 shadow-md">
-            <SelectValue placeholder="Select a student to manage fees..." />
-          </SelectTrigger>
-          <SelectContent>
-            {activeStudents.length > 0 ? (
-              activeStudents.map(student => (
-                <SelectItem key={student.id} value={student.id}>
-                  {student.name} ({student.fatherName}) - {courses.find(c=>c.id === student.courseId)?.name || 'N/A'}
-                </SelectItem>
-              ))
-            ) : (
-              <SelectItem value="no-students" disabled>No active students found.</SelectItem>
-            )}
-          </SelectContent>
-        </Select>
+      <div className="mb-6 space-y-4">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+          <Input
+            placeholder="Search students by name or father's name..."
+            value={searchTerm}
+            onChange={(e) => {
+              setSearchTerm(e.target.value);
+              if (selectedStudentId) setSelectedStudentId(null); // Clear selected student when searching
+            }}
+            className="pl-10 shadow-md w-full md:w-1/2 lg:w-1/3"
+          />
+        </div>
+
+        {searchTerm && searchedStudents.length > 0 && (
+          <Card className="shadow-lg animate-slide-in w-full md:w-1/2 lg:w-1/3">
+            <CardHeader>
+              <CardTitle className="text-lg font-headline">Search Results</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ScrollArea className="h-[200px]">
+                {searchedStudents.map(student => (
+                  <div
+                    key={student.id}
+                    onClick={() => handleStudentSelect(student.id)}
+                    className="p-3 hover:bg-muted rounded-md cursor-pointer transition-colors"
+                  >
+                    <p className="font-medium">{student.name} ({student.fatherName})</p>
+                    <p className="text-sm text-muted-foreground">
+                      {courses.find(c => c.id === student.courseId)?.name || 'N/A'}
+                    </p>
+                  </div>
+                ))}
+              </ScrollArea>
+            </CardContent>
+          </Card>
+        )}
+        {searchTerm && searchedStudents.length === 0 && !selectedStudentId && (
+           <Card className="text-center py-8 shadow-md w-full md:w-1/2 lg:w-1/3">
+            <CardContent>
+                <div className="mx-auto bg-primary/10 p-3 rounded-full w-fit mb-3">
+                    <Users className="h-8 w-8 text-primary" />
+                </div>
+                <p className="text-muted-foreground">No students found matching &quot;{searchTerm}&quot;.</p>
+            </CardContent>
+           </Card>
+        )}
       </div>
 
-      {!selectedStudent && !isAppContextLoading && (
+      {!selectedStudentId && !searchTerm && !isAppContextLoading && (
         <Card className="text-center py-12 shadow-lg animate-slide-in">
             <CardHeader>
                 <div className="mx-auto bg-primary/10 p-3 rounded-full w-fit mb-4">
                     <UserCircle className="h-16 w-16 text-primary" />
                 </div>
-                <CardTitle className="text-2xl font-headline">Select a Student</CardTitle>
-                <CardDescription>Choose a student from the dropdown above to view and manage their fee details.</CardDescription>
+                <CardTitle className="text-2xl font-headline">Select or Search a Student</CardTitle>
+                <CardDescription>Use the search bar above to find a student and manage their fee details.</CardDescription>
             </CardHeader>
         </Card>
       )}
