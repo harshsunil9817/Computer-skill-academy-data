@@ -50,11 +50,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     const fetchData = async () => {
       setIsLoading(true);
       try {
-        // TODO: Adapt Firestore query/write based on new security rules.
         const courseSnapshot = await getDocs(coursesCollectionRef);
         setCourses(courseSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Course)));
         
-        // TODO: Adapt Firestore query/write based on new security rules.
         const studentSnapshot = await getDocs(studentsCollectionRef);
         setStudents(studentSnapshot.docs.map(doc => mapDocToStudent({ ...doc.data(), id: doc.id })));
 
@@ -70,7 +68,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const addCourse = async (courseData: CourseFormData) => {
     try {
-      // TODO: Adapt Firestore query/write based on new security rules. Ensure data being sent complies.
       const docRef = await addDoc(coursesCollectionRef, courseData);
       setCourses((prev) => [...prev, { ...courseData, id: docRef.id }]);
     } catch (error) {
@@ -82,7 +79,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     const courseDoc = doc(db, 'courses', updatedCourse.id);
     const { id, ...courseDataToUpdate } = updatedCourse; 
     try {
-      // TODO: Adapt Firestore query/write based on new security rules. Ensure data being sent complies.
       await updateDoc(courseDoc, courseDataToUpdate);
       setCourses((prev) => prev.map(c => c.id === updatedCourse.id ? updatedCourse : c));
     } catch (error) {
@@ -93,7 +89,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const deleteCourse = async (courseId: string) => {
     const courseDoc = doc(db, 'courses', courseId);
     try {
-      // TODO: Adapt Firestore query/write based on new security rules.
       await deleteDoc(courseDoc);
       setCourses(prev => prev.filter(c => c.id !== courseId));
     } catch (error) {
@@ -113,7 +108,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         ...newStudentPayload,
         enrollmentDate: Timestamp.fromDate(new Date(newStudentPayload.enrollmentDate)),
       };
-      // TODO: Adapt Firestore query/write based on new security rules. Ensure data being sent complies.
       const docRef = await addDoc(studentsCollectionRef, payloadForFirestore);
       setStudents((prev) => [...prev, { ...newStudentPayload, id: docRef.id }]);
     } catch (error) {
@@ -133,7 +127,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
             date: Timestamp.fromDate(new Date(p.date)),
         })),
       };
-      // TODO: Adapt Firestore query/write based on new security rules. Ensure data being sent complies.
       await updateDoc(studentDoc, payloadForFirestore);
       setStudents((prev) => prev.map(s => s.id === updatedStudent.id ? updatedStudent : s));
     } catch (error)
@@ -153,7 +146,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
         const newPayment: PaymentRecord = { 
             ...paymentData, 
-            id: doc(collection(db, '_')).id, 
+            id: doc(collection(db, '_')).id, // Generates a local unique ID for the payment record
             date: paymentData.date, 
         };
         
@@ -169,7 +162,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
             date: Timestamp.fromDate(new Date(p.date)),
         }));
 
-        // TODO: Adapt Firestore query/write based on new security rules. Ensure data being sent complies.
         await updateDoc(studentRef, {
             paymentHistory: paymentHistoryForFirestore,
             status: newStatus,
@@ -213,3 +205,4 @@ export const useAppContext = () => {
   }
   return context;
 };
+
