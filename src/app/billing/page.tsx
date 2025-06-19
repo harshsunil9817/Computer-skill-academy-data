@@ -80,12 +80,12 @@ export default function BillingPage() {
     const enrollmentDate = parseISO(selectedStudent.enrollmentDate);
     if (isNaN(enrollmentDate.getTime())) return [];
 
-    const courseEndDate = addMonths(enrollmentDate, selectedStudent.courseDurationValue * (selectedStudent.courseDurationUnit === 'years' ? 12 : 1));
-    const lastRelevantMonth = addMonths(startOfMonth(new Date()), 3); // current month + 3 future months
+    const courseDurationInMonths = selectedStudent.courseDurationValue * (selectedStudent.courseDurationUnit === 'years' ? 12 : 1);
+    const courseEndDate = addMonths(startOfMonth(enrollmentDate), courseDurationInMonths +1); // +1 because fees start month after enrollment
     
     let currentProcessingMonth = addMonths(startOfMonth(enrollmentDate),1); // Fees start month after enrollment
 
-    while(isBefore(currentProcessingMonth, courseEndDate) && isBefore(currentProcessingMonth, lastRelevantMonth)) {
+    while(isBefore(currentProcessingMonth, courseEndDate)) {
       const monthYearStr = format(currentProcessingMonth, "MMMM yyyy");
       const paymentsForThisMonth = selectedStudent.paymentHistory
         .filter(p => (p.type === 'monthly' || p.type === 'partial') && p.monthFor === monthYearStr)
@@ -116,7 +116,9 @@ export default function BillingPage() {
 
     let currentTotalDues = enrollmentFeeDue;
     billableMonthsDetails.forEach(month => {
-        if(isBefore(month.monthDate, addMonths(startOfMonth(new Date()),1))) { // Only count past/current months for outstanding dues
+        // Only count past/current months' *remaining dues* for outstanding dues if not covered by advance.
+        // Advance will be applied later to reduce this.
+        if(isBefore(month.monthDate, addMonths(startOfMonth(new Date()),1))) { 
              currentTotalDues += month.remainingDue;
         }
     });
@@ -125,31 +127,38 @@ export default function BillingPage() {
         .filter(p => p.type === 'advance')
         .reduce((sum, p) => sum + p.amount, 0);
 
-    // Simplified advance application for now: advance reduces total dues.
-    // A more robust system would track advance application to specific items.
-    let _effectiveAdvanceBalance = Math.max(0, advancePaymentsTotal - currentTotalDues);
-    currentTotalDues = Math.max(0, currentTotalDues - advancePaymentsTotal);
+    let _effectiveAdvanceBalance = advancePaymentsTotal;
+    let tempTotalDues = enrollmentFeeDue;
 
-
-    // Update billableMonthsDetails based on advance
-    let tempAdvance = _effectiveAdvanceBalance;
-    const updatedMonths = billableMonthsDetails.map(month => {
-      let newRemainingDue = month.remainingDue;
-      let coveredByAdvance = false;
-      if (tempAdvance > 0 && newRemainingDue > 0) {
-        const amountToCover = Math.min(tempAdvance, newRemainingDue);
-        newRemainingDue -= amountToCover;
-        tempAdvance -= amountToCover;
-        coveredByAdvance = newRemainingDue <=0; // month.remainingDue > 0 && amountToCover >= month.remainingDue;
-      }
-      return { ...month, remainingDue: newRemainingDue, isCoveredByAdvance: coveredByAdvance, isFullyPaid: newRemainingDue <= 0 };
+    // Apply advance to enrollment fee first
+    if (tempTotalDues > 0 && _effectiveAdvanceBalance > 0) {
+        const amountToCoverEnrollment = Math.min(_effectiveAdvanceBalance, tempTotalDues);
+        tempTotalDues -= amountToCoverEnrollment;
+        _effectiveAdvanceBalance -= amountToCoverEnrollment;
+    }
+    
+    // Apply advance to past/current billable months before calculating final outstanding dues
+    const monthsWithAdvanceApplied = billableMonthsDetails.map(month => {
+        let newRemainingDue = month.remainingDue;
+        let coveredByAdvance = false;
+        if (_effectiveAdvanceBalance > 0 && newRemainingDue > 0) {
+            const amountToCover = Math.min(_effectiveAdvanceBalance, newRemainingDue);
+            newRemainingDue -= amountToCover;
+            _effectiveAdvanceBalance -= amountToCover;
+            coveredByAdvance = newRemainingDue <= 0;
+        }
+        // Add to total dues *after* this potential advance application for past/current months
+        if(isBefore(month.monthDate, addMonths(startOfMonth(new Date()),1))) {
+            tempTotalDues += newRemainingDue;
+        }
+        return { ...month, remainingDue: newRemainingDue, isCoveredByAdvance: coveredByAdvance, isFullyPaid: newRemainingDue <= 0 };
     });
 
 
     return { 
-        totalOutstandingDues: currentTotalDues, 
-        effectiveAdvanceBalance: _effectiveAdvanceBalance, // what's left of advance after covering current dues
-        finalBillableMonthsDetails: updatedMonths
+        totalOutstandingDues: tempTotalDues, 
+        effectiveAdvanceBalance: _effectiveAdvanceBalance, // what's left of advance after covering applicable items
+        finalBillableMonthsDetails: monthsWithAdvanceApplied
     };
 
   }, [selectedStudent, selectedStudentCourse, billableMonthsDetails, enrollmentFeeDue]);
@@ -157,14 +166,30 @@ export default function BillingPage() {
 
   const handlePayEnrollmentFee = async () => {
     if (!selectedStudent || !selectedStudentCourse || enrollmentFeeDue <= 0) return;
+    
+    let amountToPay = enrollmentFeeDue;
+    let paymentType: PaymentRecord['type'] = 'enrollment';
+    let remarks = `Enrollment fee for ${selectedStudentCourse.name}`;
+
+    // Try to use advance balance first
+    if (effectiveAdvanceBalance > 0) {
+        const advanceToUse = Math.min(effectiveAdvanceBalance, amountToPay);
+        // This scenario is tricky: AppContext.addPayment doesn't directly handle "paying with advance"
+        // For now, we'll record a direct 'enrollment' payment. Advance logic primarily affects display & outstanding calculation.
+        // A more complex system would create a "payment from advance" transaction.
+        // For simplicity, we assume advance already reduced `enrollmentFeeDue` or `totalOutstandingDues` if applicable.
+        // So, this button always means "make a new payment for the visible due amount".
+    }
+
     try {
       await addPayment(selectedStudent.id, {
         date: new Date().toISOString(),
-        amount: enrollmentFeeDue,
-        type: 'enrollment',
-        remarks: `Enrollment fee for ${selectedStudentCourse.name}`
+        amount: amountToPay,
+        type: paymentType,
+        remarks: remarks
       });
-      toast({ title: "Success", description: `Enrollment fee of ₹${enrollmentFeeDue.toLocaleString()} paid for ${selectedStudent.name}.` });
+      toast({ title: "Success", description: `Enrollment fee of ₹${amountToPay.toLocaleString()} paid for ${selectedStudent.name}.` });
+      // State will refresh due to AppContext update
     } catch (error: any) {
       toast({ title: "Error", description: `Failed to pay enrollment fee: ${error.message}`, variant: "destructive" });
     }
@@ -177,7 +202,7 @@ export default function BillingPage() {
     );
 
     if (monthsToPayNow.length === 0) {
-      toast({ title: "Info", description: "No months selected or selected months have no remaining dues.", variant: "default" });
+      toast({ title: "Info", description: "No months selected or selected months have no remaining dues/are advance covered.", variant: "default" });
       return;
     }
 
@@ -208,26 +233,25 @@ export default function BillingPage() {
 
     try {
       if (adhocPaymentType === 'settle_dues') {
-        if (totalOutstandingDues === 0) {
+        if (totalOutstandingDues === 0 && enrollmentFeeDue === 0) { // Check both enrollment and monthly
             toast({ title: "Info", description: `${selectedStudent.name} has no outstanding dues to settle.`, variant: "default" });
             return;
         }
-        // For "settle_dues", record as 'partial'. AppContext logic might evolve to apply this more specifically.
-        // Find oldest due month for remarks if possible
-        let oldestDueMonthForRemark = "";
+        
+        let oldestDueItemRemark = "";
         if(enrollmentFeeDue > 0) {
-            oldestDueMonthForRemark = "Enrollment Fee";
+            oldestDueItemRemark = "Enrollment Fee";
         } else {
             const firstUnpaidMonth = finalBillableMonthsDetails.find(m => m.remainingDue > 0 && !m.isCoveredByAdvance && isBefore(m.monthDate, startOfMonth(new Date())));
-            if (firstUnpaidMonth) oldestDueMonthForRemark = firstUnpaidMonth.monthYear;
+            if (firstUnpaidMonth) oldestDueItemRemark = firstUnpaidMonth.monthYear;
         }
 
         await addPayment(selectedStudent.id, {
           date: new Date().toISOString(),
           amount: amount,
-          type: 'partial',
-          monthFor: oldestDueMonthForRemark || undefined,
-          remarks: adhocPaymentRemarks || `Payment towards outstanding dues${oldestDueMonthForRemark ? ` (towards ${oldestDueMonthForRemark})`:''}`
+          type: 'partial', // 'partial' is used to signify it's covering some existing due.
+          monthFor: oldestDueItemRemark || undefined, // AppContext might make this more specific if needed
+          remarks: adhocPaymentRemarks || `Payment towards outstanding dues${oldestDueItemRemark ? ` (towards ${oldestDueItemRemark})`:''}`
         });
         toast({ title: "Success", description: `Payment of ₹${amount.toLocaleString()} towards dues recorded for ${selectedStudent.name}.`});
       } else if (adhocPaymentType === 'pay_in_advance') {
@@ -315,7 +339,7 @@ export default function BillingPage() {
           {/* Center Panel: Fee Status & Monthly Checklist */}
           <Card className="lg:col-span-1 shadow-lg">
             <CardHeader>
-              <CardTitle className="text-primary font-headline">{selectedStudent.name}</CardTitle>
+              <CardTitle className="font-headline text-primary">{selectedStudent.name}</CardTitle>
               <CardDescription>Course: {selectedStudentCourse.name}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -329,13 +353,13 @@ export default function BillingPage() {
                 </p>
               </div>
 
-              {enrollmentFeeDue > 0 && (
+              {enrollmentFeeDue > 0 && !isEnrollmentFeePaid(selectedStudent, selectedStudentCourse) && (
                 <div className="p-3 border border-amber-500 rounded-md bg-amber-50">
                   <p className="text-sm font-semibold text-amber-700">Enrollment Fee Due: ₹{enrollmentFeeDue.toLocaleString()}</p>
                   <Button size="sm" onClick={handlePayEnrollmentFee} className="mt-2 animate-button-click bg-amber-600 hover:bg-amber-700">Pay Enrollment Fee</Button>
                 </div>
               )}
-              {enrollmentFeeDue <= 0 && (
+              {isEnrollmentFeePaid(selectedStudent, selectedStudentCourse) && (
                  <p className="text-sm text-green-600 flex items-center p-3 border border-green-500 rounded-md bg-green-50"><CheckCircle className="mr-2 h-4 w-4"/>Enrollment Fee Paid</p>
               )}
               
@@ -432,3 +456,4 @@ export default function BillingPage() {
     </>
   );
 }
+
