@@ -186,6 +186,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       }
     } catch (uploadError: any) {
       console.error("Error uploading photo to Appwrite:", uploadError);
+      // Set photoUrlToSave to null or undefined if you want to proceed without photo
+      // For now, we let it be undefined so the payload below handles it.
     }
 
 
@@ -204,14 +206,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       const payloadForFirestore: any = {
         ...newStudentPayload,
         enrollmentDate: Timestamp.fromDate(new Date(newStudentPayload.enrollmentDate)),
+        photoUrl: photoUrlToSave || null, // Ensure photoUrl is null if undefined
       };
-      if (photoUrlToSave) {
-        payloadForFirestore.photoUrl = photoUrlToSave;
-      }
 
 
       const docRef = await addDoc(studentsCollectionRef, payloadForFirestore);
-      setStudents((prev) => [...prev, mapDocToStudent({ ...newStudentPayload, id: docRef.id, photoUrl: photoUrlToSave })]);
+      setStudents((prev) => [...prev, mapDocToStudent({ ...newStudentPayload, id: docRef.id, photoUrl: photoUrlToSave || undefined })]);
     } catch (error: any) {
       console.error("Error adding student to Firestore:", error);
       throw error;
@@ -238,6 +238,11 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           date: p.date instanceof Date ? Timestamp.fromDate(p.date) : Timestamp.fromDate(new Date(p.date)),
       }));
     }
+    // Ensure photoUrl is not set to undefined
+    if (payloadForFirestore.hasOwnProperty('photoUrl') && payloadForFirestore.photoUrl === undefined) {
+        payloadForFirestore.photoUrl = null;
+    }
+
 
     try {
       await updateDoc(studentDocRef, payloadForFirestore);
@@ -318,6 +323,18 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     }
     const studentDocRef = doc(db, 'students', studentId);
     try {
+      const studentToDelete = students.find(s => s.id === studentId);
+      if (studentToDelete && studentToDelete.photoUrl) {
+        try {
+          const fileId = studentToDelete.photoUrl.split('/files/')[1].split('/view')[0];
+          if (fileId) {
+             await appwriteStorage.deleteFile(APPWRITE_STUDENT_PHOTOS_BUCKET_ID, fileId);
+             console.log("Appwrite photo deleted:", fileId);
+          }
+        } catch (appwriteError) {
+            console.error("Error deleting photo from Appwrite, proceeding with Firestore delete:", appwriteError);
+        }
+      }
       await deleteDoc(studentDocRef);
       setStudents(prev => prev.filter(s => s.id !== studentId));
     } catch (error: any) {
@@ -338,12 +355,22 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       const studentRef = doc(db, 'students', student.id);
       let newStatus = student.status;
       
-      const enrollmentPaidBeforeClear = student.paymentHistory.some(p => p.type === 'enrollment');
+      // Check if enrollment was effectively paid before clearing history.
+      // This check needs to be against the *current* payment history.
+      const course = courses.find(c => c.id === student.courseId);
+      const enrollmentFeePaidAmount = student.paymentHistory
+          .filter(p => p.type === 'enrollment')
+          .reduce((sum, p) => sum + p.amount, 0);
+      const wasEnrollmentFeeSufficientlyPaid = course && enrollmentFeePaidAmount >= course.enrollmentFee;
+
 
       if (student.status === 'completed_paid' || student.status === 'completed_unpaid' || student.status === 'active') {
-        newStatus = enrollmentPaidBeforeClear ? 'active' : 'enrollment_pending';
+        newStatus = wasEnrollmentFeeSufficientlyPaid ? 'active' : 'enrollment_pending';
+      } else if (student.status === 'enrollment_pending') {
+        // If they were pending, they remain pending unless this clear operation somehow implied they should be active (which it shouldn't)
+        newStatus = 'enrollment_pending';
       }
-      // 'left' status remains 'left', 'enrollment_pending' remains 'enrollment_pending' unless it was active due to paid enrollment
+      // 'left' status remains 'left'
 
       batch.update(studentRef, { paymentHistory: [], status: newStatus });
       updatedStudentsLocally.push({ ...student, paymentHistory: [], status: newStatus });
@@ -384,3 +411,6 @@ export const useAppContext = () => {
   }
   return context;
 };
+
+
+    
