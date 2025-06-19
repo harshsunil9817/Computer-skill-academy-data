@@ -89,16 +89,27 @@ export default function StudentsPage() {
       return;
     }
 
-    if (editingStudent) {
-      toast({ title: "Info", description: "Student update functionality placeholder." });
-    } else {
-      await addStudent(studentForm); 
-      toast({ title: "Success", description: "Student added successfully. Enrollment fee pending." });
+    try {
+      if (editingStudent) {
+        // Placeholder for update functionality if you implement it
+        // await updateStudent({ ...editingStudent, ...studentForm }); // Assuming updateStudent exists and handles Student type
+        toast({ title: "Info", description: "Student update functionality placeholder." });
+      } else {
+        await addStudent(studentForm); 
+        toast({ title: "Success", description: "Student added successfully. Enrollment fee pending." });
+      }
+      setIsDialogOpen(false);
+      setStudentForm(initialStudentFormState);
+      setEditingStudent(null);
+      setSelectedCourseDetails(null);
+    } catch (error: any) {
+      console.error("Student operation failed:", error);
+      toast({
+        title: "Operation Failed",
+        description: error.message || "Could not save student. Please check security rules or console for details.",
+        variant: "destructive",
+      });
     }
-    setIsDialogOpen(false);
-    setStudentForm(initialStudentFormState);
-    setEditingStudent(null);
-    setSelectedCourseDetails(null);
   };
 
   const openAddDialog = () => {
@@ -108,29 +119,12 @@ export default function StudentsPage() {
     setIsDialogOpen(true);
   };
   
-  if (isLoading) {
-    return (
-        <div className="flex flex-col items-center justify-center min-h-[calc(100vh-10rem)]">
-            <PageHeader
-                title="Manage Students"
-                description="Add new students and view existing enrollments."
-                 action={
-                  <Button onClick={openAddDialog} className="animate-button-click" disabled>
-                    <PlusCircle className="mr-2 h-5 w-5" /> Add New Student
-                  </Button>
-                }
-            />
-            <div className="text-center py-10 text-muted-foreground">Loading student and course data...</div>
-        </div>
-    );
-  }
-
   const pageHeader = (
     <PageHeader
       title="Manage Students"
       description="Add new students and view existing enrollments."
       action={
-        <Button onClick={openAddDialog} className="animate-button-click">
+        <Button onClick={openAddDialog} className="animate-button-click" disabled={isLoading}>
           <PlusCircle className="mr-2 h-5 w-5" /> Add New Student
         </Button>
       }
@@ -233,8 +227,19 @@ export default function StudentsPage() {
       </DialogContent>
     </Dialog>
   );
+  
+  if (isLoading) {
+    return (
+        <>
+          {pageHeader}
+          <div className="text-center py-10 text-muted-foreground">Loading student and course data...</div>
+          {studentDialog}
+        </>
+    );
+  }
 
-  if (students.length === 0) {
+
+  if (students.length === 0 && !isLoading) {
     return (
       <>
         {pageHeader}
@@ -297,3 +302,5 @@ export default function StudentsPage() {
     </>
   );
 }
+
+    
