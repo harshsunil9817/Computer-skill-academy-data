@@ -15,6 +15,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { format, addMonths, isBefore, isEqual, startOfMonth, getMonth, getYear, parse } from 'date-fns';
+import { cn } from '@/lib/utils'; // Added missing import
 
 interface BillableMonth {
   monthYear: string; // "MMMM yyyy"
@@ -244,7 +245,7 @@ export default function BillingPage() {
   const { students, courses, addPayment, isLoading, updateStudent } = useAppContext(); // Added updateStudent
   const { toast } = useToast(); 
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState('enrollment');
+  const [activeTab, setActiveTab] = useState('due');
   
   const handlePayEnrollment = async (studentId: string, course: Course) => {
     try {
