@@ -1,7 +1,7 @@
 
 "use client";
 import React, { useState, useEffect } from 'react';
-import { DollarSign, CheckCircle, AlertCircle, History, Search, ListFilter } from 'lucide-react';
+import { DollarSign, CheckCircle, AlertCircle, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -10,11 +10,9 @@ import { PageHeader } from '@/components/ui/page-header';
 import { useAppContext } from '@/lib/context/AppContext';
 import type { Student, Course, PaymentRecord } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { format } from 'date-fns';
 
 
@@ -24,53 +22,73 @@ interface StudentFeeItemProps {
   onPayEnrollment?: (studentId: string, course: Course) => void;
   onPayMonthly?: (studentId: string, amount: number, course: Course) => void;
   onPayPartial?: (studentId: string, amount: number, course: Course) => void;
-  onViewHistory?: (student: Student) => void;
   type: 'enrollment' | 'due' | 'paid';
 }
 
-function StudentFeeItem({ student, course, onPayEnrollment, onPayMonthly, onPayPartial, onViewHistory, type }: StudentFeeItemProps) {
+function StudentFeeItem({ student, course, onPayEnrollment, onPayMonthly, onPayPartial, type }: StudentFeeItemProps) {
   const [partialAmount, setPartialAmount] = useState('');
+  const { toast } = useToast(); // Renamed to avoid conflict with AppContext's toast if used directly here
 
   if (!course) return null;
 
   const getDueAmount = () => {
     if (!course) return 0;
 
-    if (type === 'enrollment') { // This is for the "Enrollment Pending" tab
+    if (type === 'enrollment') {
       return course.enrollmentFee;
     }
 
-    // This is for the "Monthly Dues" tab (type === 'due')
-    // It should calculate the total outstanding amount for past monthly fees.
     if (type === 'due' && student.status === 'active') {
       const currentDate = new Date();
-      // Ensure time part is zeroed out for consistent date comparisons
       currentDate.setHours(0, 0, 0, 0); 
       
       const enrollmentDate = new Date(student.enrollmentDate);
       enrollmentDate.setHours(0,0,0,0);
 
       let expectedMonthlyPaymentCycles = 0;
-      // Billing starts from the first day of the month *after* the enrollment month.
       let nextBillingCycleStartDate = new Date(enrollmentDate.getFullYear(), enrollmentDate.getMonth() + 1, 1);
 
-      // Count how many billing cycles should have occurred up to the current date.
       while (nextBillingCycleStartDate <= currentDate) {
-        expectedMonthlyPaymentCycles++;
+        const paymentForThisCycle = student.paymentHistory.find(p => 
+            (p.type === 'monthly' || p.type === 'partial') && 
+            p.monthFor && 
+            new Date(p.monthFor).getFullYear() === nextBillingCycleStartDate.getFullYear() &&
+            new Date(p.monthFor).getMonth() === nextBillingCycleStartDate.getMonth()
+        );
+        
+        if (!paymentForThisCycle) { // Only count cycles if not paid
+             expectedMonthlyPaymentCycles++;
+        } else if (paymentForThisCycle.type === 'partial' && paymentForThisCycle.amount < course.monthlyFee){
+            // If partially paid for the cycle, it's still considered due for remaining.
+            // This logic might need adjustment based on how partials are treated towards "due count".
+            // For simplicity, this example will count a partially paid month as "needing payment"
+            // The actual due *amount* will be handled below.
+            // A more sophisticated system might track specific months and their exact due amounts.
+        }
+
         nextBillingCycleStartDate.setMonth(nextBillingCycleStartDate.getMonth() + 1);
       }
+      
+      let totalDue = 0;
+      // Recalculate due amount based on expected cycles and payments
+      nextBillingCycleStartDate = new Date(enrollmentDate.getFullYear(), enrollmentDate.getMonth() + 1, 1); // Reset for due calculation
+       while (nextBillingCycleStartDate <= currentDate) {
+        const paymentsForMonth = student.paymentHistory
+          .filter(p => (p.type === 'monthly' || p.type === 'partial') && p.monthFor && 
+                       new Date(p.monthFor).getFullYear() === nextBillingCycleStartDate.getFullYear() &&
+                       new Date(p.monthFor).getMonth() === nextBillingCycleStartDate.getMonth());
+        
+        const amountPaidForMonth = paymentsForMonth.reduce((sum, p) => sum + p.amount, 0);
 
-      // Count how many monthly payment *transactions* have been made.
-      const actualMonthlyPaymentTransactions = student.paymentHistory.filter(p => p.type === 'monthly').length;
-
-      if (expectedMonthlyPaymentCycles > actualMonthlyPaymentTransactions) {
-        const numberOfUnpaidMonths = expectedMonthlyPaymentCycles - actualMonthlyPaymentTransactions;
-        return course.monthlyFee * numberOfUnpaidMonths;
+        if (amountPaidForMonth < course.monthlyFee) {
+          totalDue += (course.monthlyFee - amountPaidForMonth);
+        }
+        nextBillingCycleStartDate.setMonth(nextBillingCycleStartDate.getMonth() + 1);
       }
+      return totalDue;
     }
-    return 0; // No due amount if not enrollment type or no outstanding monthly dues
+    return 0; 
   };
-
 
   const dueAmount = getDueAmount();
 
@@ -105,7 +123,7 @@ function StudentFeeItem({ student, course, onPayEnrollment, onPayMonthly, onPayP
             <p>Monthly Fee Due: <span className="font-semibold">₹{dueAmount.toLocaleString()}</span></p>
             <div className="mt-3 flex space-x-2 items-end">
               <Button onClick={() => onPayMonthly?.(student.id, dueAmount, course)} size="sm" className="animate-button-click">
-                <DollarSign className="mr-2 h-4 w-4" /> Pay Full Due
+                <DollarSign className="mr-2 h-4 w-4" /> Pay Full Due ({/* Number of months due could be displayed here */})
               </Button>
               <div className="flex flex-col space-y-1">
                 <Label htmlFor={`partial-${student.id}`} className="text-xs">Partial Payment (₹)</Label>
@@ -121,7 +139,6 @@ function StudentFeeItem({ student, course, onPayEnrollment, onPayMonthly, onPayP
               <Button
                 onClick={() => {
                   const amount = parseFloat(partialAmount);
-                  // Ensure partial amount is less than total due and greater than 0
                   if (amount > 0 && amount < dueAmount) { 
                     onPayPartial?.(student.id, amount, course);
                     setPartialAmount('');
@@ -146,9 +163,7 @@ function StudentFeeItem({ student, course, onPayEnrollment, onPayMonthly, onPayP
             <CheckCircle className="mr-2 h-5 w-5" /> All dues cleared for now.
           </p>
         )}
-         <Button variant="link" onClick={() => onViewHistory?.(student)} className="mt-2 p-0 h-auto text-sm animate-button-click">
-            <History className="mr-1 h-4 w-4" /> View Payment History
-        </Button>
+         {/* View Payment History button removed from here */}
       </CardContent>
     </Card>
   );
@@ -156,57 +171,59 @@ function StudentFeeItem({ student, course, onPayEnrollment, onPayMonthly, onPayP
 
 
 export default function BillingPage() {
-  const { students, courses, addPayment, isLoading, toast: contextToast } = useAppContext(); // Assuming context provides a toast
-  const { toast } = useToast(); // This is the page-level toast
+  const { students, courses, addPayment, isLoading } = useAppContext();
+  const { toast } = useToast(); 
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('enrollment');
   
-  const [viewingStudentHistory, setViewingStudentHistory] = useState<Student | null>(null);
+  // viewingStudentHistory state and related dialog removed from here
 
-
-  const handlePayEnrollment = (studentId: string, course: Course) => {
-    addPayment(studentId, {
-      date: new Date().toISOString(),
-      amount: course.enrollmentFee,
-      type: 'enrollment',
-      remarks: `Enrollment fee for ${course.name}`
-    }).then(() => {
+  const handlePayEnrollment = async (studentId: string, course: Course) => {
+    try {
+      await addPayment(studentId, {
+        date: new Date().toISOString(),
+        amount: course.enrollmentFee,
+        type: 'enrollment',
+        remarks: `Enrollment fee for ${course.name}`
+      });
       toast({ title: "Success", description: `${students.find(s=>s.id === studentId)?.name}'s enrollment fee paid.` });
-    }).catch(error => {
+    } catch (error: any) {
       toast({ title: "Error", description: `Failed to process enrollment payment: ${error.message}`, variant: "destructive" });
-    });
+    }
   };
 
-  const handlePayMonthly = (studentId: string, amount: number, course: Course) => {
-     addPayment(studentId, {
-      date: new Date().toISOString(),
-      amount: amount,
-      type: 'monthly',
-      monthFor: format(new Date(), "MMMM yyyy"), 
-      remarks: `Monthly fee for ${course.name}`
-    }).then(() => {
-      toast({ title: "Success", description: `Monthly fee paid for ${students.find(s=>s.id === studentId)?.name}.` });
-    }).catch(error => {
+  const handlePayMonthly = async (studentId: string, amount: number, course: Course) => {
+    // This function is for paying the *total accumulated due*. 
+    // The `addPayment` function in context should be designed to handle one payment record.
+    // For simplicity, we'll record this as a single 'monthly' payment covering the total due.
+    // A more complex system might break this down or require specific month selection.
+    try {
+      await addPayment(studentId, {
+        date: new Date().toISOString(),
+        amount: amount, // This is the total due amount
+        type: 'monthly', // Or a special type like 'bulk_due_payment'
+        monthFor: format(new Date(), "MMMM yyyy"), // Could be 'Multiple Months Due'
+        remarks: `Payment for outstanding monthly fees for ${course.name}`
+      });
+      toast({ title: "Success", description: `Outstanding dues paid for ${students.find(s=>s.id === studentId)?.name}.` });
+    } catch (error: any) {
        toast({ title: "Error", description: `Failed to process monthly payment: ${error.message}`, variant: "destructive" });
-    });
+    }
   };
   
-  const handlePayPartial = (studentId: string, amount: number, course: Course) => {
-    addPayment(studentId, {
-      date: new Date().toISOString(),
-      amount: amount,
-      type: 'partial',
-      monthFor: format(new Date(), "MMMM yyyy"),
-      remarks: `Partial monthly fee for ${course.name}`
-    }).then(() => {
+  const handlePayPartial = async (studentId: string, amount: number, course: Course) => {
+    try {
+      await addPayment(studentId, {
+        date: new Date().toISOString(),
+        amount: amount,
+        type: 'partial',
+        monthFor: format(new Date(), "MMMM yyyy"), // User should ideally specify which month this partial payment is for
+        remarks: `Partial monthly fee for ${course.name}`
+      });
       toast({ title: "Success", description: `Partial payment recorded for ${students.find(s=>s.id === studentId)?.name}.` });
-    }).catch(error => {
+    } catch (error: any) {
       toast({ title: "Error", description: `Failed to process partial payment: ${error.message}`, variant: "destructive" });
-    });
-  };
-
-  const openHistoryDialog = (student: Student) => {
-    setViewingStudentHistory(student);
+    }
   };
 
   const filteredStudents = students.filter(student => 
@@ -227,16 +244,23 @@ export default function BillingPage() {
     const enrollmentDate = new Date(s.enrollmentDate);
     enrollmentDate.setHours(0,0,0,0);
         
-    let expectedMonthlyPaymentCycles = 0;
+    let totalDue = 0;
     let nextBillingCycleStartDate = new Date(enrollmentDate.getFullYear(), enrollmentDate.getMonth() + 1, 1);
     
     while(nextBillingCycleStartDate <= currentDate) {
-        expectedMonthlyPaymentCycles++;
+        const paymentsForMonth = s.paymentHistory
+          .filter(p => (p.type === 'monthly' || p.type === 'partial') && p.monthFor && 
+                       new Date(p.monthFor).getFullYear() === nextBillingCycleStartDate.getFullYear() &&
+                       new Date(p.monthFor).getMonth() === nextBillingCycleStartDate.getMonth());
+        
+        const amountPaidForMonth = paymentsForMonth.reduce((sum, p) => sum + p.amount, 0);
+
+        if (amountPaidForMonth < course.monthlyFee) {
+          totalDue += (course.monthlyFee - amountPaidForMonth);
+        }
         nextBillingCycleStartDate.setMonth(nextBillingCycleStartDate.getMonth() + 1);
     }
-
-    const actualMonthlyPaymentTransactions = s.paymentHistory.filter(p => p.type === 'monthly').length;
-    return expectedMonthlyPaymentCycles > actualMonthlyPaymentTransactions;
+    return totalDue > 0;
   });
 
   const noDueStudents = filteredStudents.filter(s => 
@@ -274,7 +298,7 @@ export default function BillingPage() {
             onPayEnrollment={handlePayEnrollment}
             onPayMonthly={handlePayMonthly}
             onPayPartial={handlePayPartial}
-            onViewHistory={openHistoryDialog}
+            // onViewHistory removed
             type={type}
           />
         ))}
@@ -296,7 +320,6 @@ export default function BillingPage() {
                 className="pl-10"
             />
         </div>
-        {/* <Button variant="outline"><ListFilter className="mr-2 h-4 w-4" /> Filters</Button> */}
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="animate-slide-in">
@@ -323,47 +346,7 @@ export default function BillingPage() {
         </TabsContent>
       </Tabs>
 
-      <Dialog open={!!viewingStudentHistory} onOpenChange={() => setViewingStudentHistory(null)}>
-        <DialogContent className="sm:max-w-lg shadow-2xl rounded-lg">
-          <DialogHeader>
-            <DialogTitle className="font-headline text-primary">Payment History: {viewingStudentHistory?.name}</DialogTitle>
-          </DialogHeader>
-          {viewingStudentHistory && viewingStudentHistory.paymentHistory.length > 0 ? (
-            <ScrollArea className="max-h-[60vh] mt-4">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Amount (₹)</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Remarks</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {viewingStudentHistory.paymentHistory.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map(payment => (
-                    <TableRow key={payment.id}>
-                      <TableCell>{new Date(payment.date).toLocaleDateString()}</TableCell>
-                      <TableCell>{payment.amount.toLocaleString()}</TableCell>
-                      <TableCell className="capitalize">{payment.type} {payment.monthFor && `(${payment.monthFor})`}</TableCell>
-                      <TableCell>{payment.remarks}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </ScrollArea>
-          ) : (
-            <p className="py-8 text-center text-muted-foreground">No payment history found for this student.</p>
-          )}
-          <DialogFooter className="mt-6">
-            <DialogClose asChild>
-              <Button type="button" variant="outline" className="animate-button-click">Close</Button>
-            </DialogClose>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Payment History Dialog removed from here */}
     </>
   );
 }
-
-
-    
