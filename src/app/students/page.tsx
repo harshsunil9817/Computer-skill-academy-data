@@ -2,7 +2,7 @@
 "use client";
 import React, { useState, useEffect } from 'react';
 import { PlusCircle, User, Users, MoreVertical, CreditCard, History, DollarSign, CalendarCheck2, CheckCircle, Trash2, UserMinus } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { 
   Dialog, 
   DialogContent, 
