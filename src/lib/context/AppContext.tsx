@@ -11,9 +11,9 @@ import {
   updateDoc, 
   deleteDoc, 
   doc,
-  query,
-  writeBatch,
-  where,
+  // query, // query was imported but not used, remove if not needed elsewhere
+  // writeBatch, // writeBatch was imported but not used
+  // where, // where was imported but not used
   Timestamp
 } from 'firebase/firestore';
 
@@ -31,11 +31,10 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-// Helper to convert Firestore doc data (handles Timestamps if you use them)
-const mapDocToCourse = (docData: any): Course => ({
-  ...docData,
-  // Convert Firestore Timestamps to ISO strings if necessary, or ensure types match
-});
+// Helper to convert Firestore doc data
+// const mapDocToCourse = (docData: any): Course => ({  // This was very simple, direct mapping is fine
+//   ...docData,
+// });
 
 const mapDocToStudent = (docData: any): Student => ({
   ...docData,
@@ -67,12 +66,13 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
       } catch (error) {
         console.error("Failed to load data from Firestore", error);
-        // Potentially set an error state here
+        // Potentially set an error state here to display in UI
       }
       setIsLoading(false);
     };
     fetchData();
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty dependency array means this runs once on mount
 
 
   const addCourse = async (courseData: CourseFormData) => {
@@ -81,14 +81,15 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       setCourses((prev) => [...prev, { ...courseData, id: docRef.id }]);
     } catch (error) {
       console.error("Error adding course:", error);
+      // Potentially throw error or return a status to caller
     }
   };
 
   const updateCourse = async (updatedCourse: Course) => {
     const courseDoc = doc(db, 'courses', updatedCourse.id);
-    const { id, ...courseData } = updatedCourse; // Firestore update data should not contain id
+    const { id, ...courseDataToUpdate } = updatedCourse; 
     try {
-      await updateDoc(courseDoc, courseData);
+      await updateDoc(courseDoc, courseDataToUpdate);
       setCourses((prev) => prev.map(c => c.id === updatedCourse.id ? updatedCourse : c));
     } catch (error) {
       console.error("Error updating course:", error);
@@ -100,8 +101,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     try {
       await deleteDoc(courseDoc);
       setCourses(prev => prev.filter(c => c.id !== courseId));
-      // Optionally, handle students enrolled in this course (e.g., unenroll or archive)
-      // This might involve a batch write or cloud function for consistency
+      // Consider implications for students enrolled in the deleted course.
+      // For example, you might want to update their status or courseId.
+      // This could be handled here with more Firestore operations or via a Cloud Function.
     } catch (error) {
       console.error("Error deleting course:", error);
     }
@@ -110,12 +112,20 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const addStudent = async (studentData: StudentFormData) => {
     const newStudentPayload: Omit<Student, 'id'> = {
       ...studentData,
-      enrollmentDate: studentData.enrollmentDate, // Already a string
+      enrollmentDate: studentData.enrollmentDate, // Ensure this is ISO string or Firestore Timestamp
       status: 'enrollment_pending',
       paymentHistory: [],
     };
     try {
-      const docRef = await addDoc(studentsCollectionRef, newStudentPayload);
+      // Convert date strings to Firestore Timestamps if preferred for querying/sorting in Firestore
+      const payloadForFirestore = {
+        ...newStudentPayload,
+        enrollmentDate: Timestamp.fromDate(new Date(newStudentPayload.enrollmentDate)),
+        // dob can also be stored as a single Timestamp if that simplifies queries, 
+        // but string parts are also fine.
+      };
+      const docRef = await addDoc(studentsCollectionRef, payloadForFirestore);
+      // When setting state, use the original ISO string for dates for consistency with mapDocToStudent
       setStudents((prev) => [...prev, { ...newStudentPayload, id: docRef.id }]);
     } catch (error) {
       console.error("Error adding student:", error);
@@ -124,11 +134,21 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   
   const updateStudent = async (updatedStudent: Student) => {
     const studentDoc = doc(db, 'students', updatedStudent.id);
-    const { id, ...studentData } = updatedStudent;
+    const { id, ...studentDataToUpdate } = updatedStudent;
     try {
-      await updateDoc(studentDoc, studentData);
+       // Convert date strings back to Timestamps before updating if they were stored as such
+      const payloadForFirestore = {
+        ...studentDataToUpdate,
+        enrollmentDate: Timestamp.fromDate(new Date(studentDataToUpdate.enrollmentDate)),
+        paymentHistory: studentDataToUpdate.paymentHistory.map(p => ({
+            ...p,
+            date: Timestamp.fromDate(new Date(p.date)),
+        })),
+      };
+      await updateDoc(studentDoc, payloadForFirestore);
       setStudents((prev) => prev.map(s => s.id === updatedStudent.id ? updatedStudent : s));
-    } catch (error) {
+    } catch (error)
+      {
       console.error("Error updating student:", error);
     }
   };
@@ -139,14 +159,13 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         const currentStudent = students.find(s => s.id === studentId);
         if (!currentStudent) {
             console.error("Student not found for payment");
-            return;
+            return; // Or throw an error
         }
 
-        // Firestore uses its own Timestamp, but we can store ISO strings directly or convert
         const newPayment: PaymentRecord = { 
             ...paymentData, 
-            id: Math.random().toString(36).substr(2, 9), // Temporary client-side ID, Firestore handles its own
-            date: paymentData.date, // Assuming this is already an ISO string
+            id: doc(collection(db, '_')).id, // Generate a new Firestore ID for the payment sub-item
+            date: paymentData.date, // Keep as ISO string from input
         };
         
         const updatedPaymentHistory = [...currentStudent.paymentHistory, newPayment];
@@ -155,13 +174,20 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         if (paymentData.type === 'enrollment' && currentStudent.status === 'enrollment_pending') {
             newStatus = 'active';
         }
-        // Add more complex status logic if needed
+        // Add more complex status logic if needed, e.g., for course completion based on payments
+
+        // Prepare payment history for Firestore (convert dates to Timestamps)
+        const paymentHistoryForFirestore = updatedPaymentHistory.map(p => ({
+            ...p,
+            date: Timestamp.fromDate(new Date(p.date)),
+        }));
 
         await updateDoc(studentRef, {
-            paymentHistory: updatedPaymentHistory,
+            paymentHistory: paymentHistoryForFirestore,
             status: newStatus,
         });
 
+        // Update local state with ISO date strings for consistency
         setStudents(prevStudents =>
             prevStudents.map(s => 
                 s.id === studentId 
@@ -200,5 +226,3 @@ export const useAppContext = () => {
   }
   return context;
 };
-
-    
