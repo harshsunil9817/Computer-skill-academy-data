@@ -1,7 +1,7 @@
 
 "use client";
-import React, { useState, useEffect } from 'react';
-import { DollarSign, CheckCircle, AlertCircle, Search } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { DollarSign, CheckCircle, AlertCircle, Search, CalendarDays } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -13,65 +13,114 @@ import { useToast } from '@/hooks/use-toast';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
-import { format, getMonth, getYear, addMonths, isBefore, isEqual } from 'date-fns';
+import { Checkbox } from '@/components/ui/checkbox';
+import { format, addMonths, isBefore, isEqual, startOfMonth, getMonth, getYear, parse } from 'date-fns';
 
+interface BillableMonth {
+  monthYear: string; // "MMMM yyyy"
+  dueDate: Date;
+  amountPaidThisMonth: number;
+  amountDueThisMonth: number;
+  isFullyPaid: boolean;
+  remainingDue: number;
+}
 
 interface StudentFeeItemProps {
   student: Student;
   course?: Course;
   onPayEnrollment?: (studentId: string, course: Course) => void;
-  onPayMonthly?: (studentId: string, amount: number, course: Course, remarks: string) => void;
+  onPaySelectedMonths?: (studentId: string, course: Course, monthsToPay: { monthYear: string, amount: number }[]) => Promise<void>;
   onPayPartial?: (studentId: string, amount: number, course: Course, monthFor: string) => void;
   type: 'enrollment' | 'due' | 'paid';
 }
 
-function StudentFeeItem({ student, course, onPayEnrollment, onPayMonthly, onPayPartial, type }: StudentFeeItemProps) {
+function StudentFeeItem({ student, course, onPayEnrollment, onPaySelectedMonths, onPayPartial, type }: StudentFeeItemProps) {
   const [partialAmount, setPartialAmount] = useState('');
   const { toast } = useToast();
+  const [billableMonths, setBillableMonths] = useState<BillableMonth[]>([]);
+  const [selectedMonthsToPay, setSelectedMonthsToPay] = useState<Record<string, boolean>>({});
 
-  if (!course) return null;
+  const calculateBillableMonths = useCallback(() => {
+    if (!course || student.status !== 'active') {
+      setBillableMonths([]);
+      return { totalDue: 0, oldestDueMonth: '', monthsDetails: [] };
+    }
 
-  const getDueAmountDetails = () => {
-    if (!course || student.status !== 'active') return { totalDue: 0, dueMonthsCount: 0, oldestDueMonth: '' };
+    const months: BillableMonth[] = [];
+    let totalOverallDue = 0;
+    let oldestDueMonthString = '';
 
-    let totalDue = 0;
-    let dueMonthsCount = 0;
-    let oldestDueMonth = '';
+    const currentDate = startOfMonth(new Date());
+    const enrollmentDate = startOfMonth(new Date(student.enrollmentDate));
+    let currentBillableMonthDate = addMonths(enrollmentDate, 1); // Monthly fees start from the month *after* enrollment
 
-    const currentDate = new Date();
-    currentDate.setHours(0, 0, 0, 0);
-    
-    const enrollmentDate = new Date(student.enrollmentDate);
-    enrollmentDate.setHours(0, 0, 0, 0);
-
-    // Monthly fees start from the month *after* enrollment
-    let currentBillableMonthDate = addMonths(new Date(enrollmentDate.getFullYear(), enrollmentDate.getMonth(), 1), 1);
-
-    while (isBefore(currentBillableMonthDate, currentDate) || isEqual(currentBillableMonthDate, new Date(currentDate.getFullYear(), currentDate.getMonth(), 1)) ) {
+    while (isBefore(currentBillableMonthDate, currentDate) || isEqual(currentBillableMonthDate, currentDate)) {
       const monthStr = format(currentBillableMonthDate, "MMMM yyyy");
       
       const paymentsForThisMonth = student.paymentHistory.filter(p => 
         (p.type === 'monthly' || p.type === 'partial') && p.monthFor === monthStr
       );
       const amountPaidForThisMonth = paymentsForThisMonth.reduce((sum, p) => sum + p.amount, 0);
+      const remainingDueForThisMonth = Math.max(0, course.monthlyFee - amountPaidForThisMonth);
+      const isFullyPaid = remainingDueForThisMonth <= 0;
 
-      if (amountPaidForThisMonth < course.monthlyFee) {
-        totalDue += (course.monthlyFee - amountPaidForThisMonth);
-        dueMonthsCount++;
-        if (!oldestDueMonth) {
-          oldestDueMonth = monthStr;
+      months.push({
+        monthYear: monthStr,
+        dueDate: new Date(currentBillableMonthDate),
+        amountPaidThisMonth: amountPaidForThisMonth,
+        amountDueThisMonth: course.monthlyFee,
+        isFullyPaid: isFullyPaid,
+        remainingDue: remainingDueForThisMonth,
+      });
+
+      if (!isFullyPaid) {
+        totalOverallDue += remainingDueForThisMonth;
+        if (!oldestDueMonthString) {
+          oldestDueMonthString = monthStr;
         }
       }
       currentBillableMonthDate = addMonths(currentBillableMonthDate, 1);
     }
-    return { totalDue, dueMonthsCount, oldestDueMonth };
+    setBillableMonths(months.sort((a,b) => a.dueDate.getTime() - b.dueDate.getTime())); // sort oldest first
+    return { totalDue: totalOverallDue, oldestDueMonth: oldestDueMonthString, monthsDetails: months };
+  }, [student, course]);
+
+
+  useEffect(() => {
+    calculateBillableMonths();
+    setSelectedMonthsToPay({}); // Reset selections when student/course changes
+  }, [calculateBillableMonths]);
+
+  const handleMonthSelectionChange = (monthYear: string, checked: boolean) => {
+    setSelectedMonthsToPay(prev => ({ ...prev, [monthYear]: checked }));
+  };
+
+  const currentlySelectedMonthsForPayment = billableMonths.filter(
+    bm => selectedMonthsToPay[bm.monthYear] && !bm.isFullyPaid
+  );
+
+  const totalAmountForSelectedMonths = currentlySelectedMonthsForPayment.reduce(
+    (sum, bm) => sum + bm.remainingDue, 0
+  );
+
+  const handlePaySelected = async () => {
+    if (!course || !onPaySelectedMonths || currentlySelectedMonthsForPayment.length === 0) return;
+    const monthsToPayObjects = currentlySelectedMonthsForPayment.map(bm => ({
+      monthYear: bm.monthYear,
+      amount: bm.remainingDue,
+    }));
+    await onPaySelectedMonths(student.id, course, monthsToPayObjects);
+    setSelectedMonthsToPay({}); // Clear selection after payment
+    // Recalculate billable months to reflect payment
+    setTimeout(calculateBillableMonths, 500); // give a slight delay for context to update if needed
   };
   
-  const { totalDue: dueAmount, dueMonthsCount, oldestDueMonth } = getDueAmountDetails();
+  const { oldestDueMonth } = calculateBillableMonths(); // to get oldestDueMonth for partial payment
 
+  if (!course) return null;
 
   return (
-    <Card className="mb-4 shadow-md hover:shadow-lg transition-shadow">
+    <Card className="mb-6 shadow-md hover:shadow-lg transition-shadow">
       <CardHeader>
         <div className="flex justify-between items-start">
           <div>
@@ -80,7 +129,7 @@ function StudentFeeItem({ student, course, onPayEnrollment, onPayMonthly, onPayP
           </div>
           <Badge variant={
             student.status === 'enrollment_pending' ? 'destructive' :
-            (dueAmount > 0 && type === 'due') ? 'destructive' :
+            (type === 'due' && billableMonths.some(bm => !bm.isFullyPaid)) ? 'destructive' :
             'default'
           } className="capitalize">
             {student.status.replace('_', ' ')}
@@ -96,21 +145,50 @@ function StudentFeeItem({ student, course, onPayEnrollment, onPayMonthly, onPayP
             </Button>
           </>
         )}
-        {type === 'due' && dueAmount > 0 && (
-          <>
-            <p>Monthly Fee Due: <span className="font-semibold">₹{dueAmount.toLocaleString()}</span> ({dueMonthsCount} month(s))</p>
-            {oldestDueMonth && <p className="text-xs text-muted-foreground">Oldest due: {oldestDueMonth}</p>}
-            <div className="mt-3 flex space-x-2 items-end">
+        {type === 'due' && billableMonths.length > 0 && (
+          <div className="space-y-4">
+            <div className="max-h-60 overflow-y-auto pr-2 space-y-2 border rounded-md p-3 bg-muted/30">
+              {billableMonths.map((bm) => (
+                <div key={bm.monthYear} className="flex items-center justify-between p-2 rounded-md bg-background shadow-sm">
+                  <div className="flex items-center space-x-3">
+                    <Checkbox
+                      id={`${student.id}-${bm.monthYear}`}
+                      checked={bm.isFullyPaid || !!selectedMonthsToPay[bm.monthYear]}
+                      disabled={bm.isFullyPaid}
+                      onCheckedChange={(checked) => handleMonthSelectionChange(bm.monthYear, !!checked)}
+                    />
+                    <Label htmlFor={`${student.id}-${bm.monthYear}`} className={cn("text-sm", bm.isFullyPaid ? "text-green-600" : "text-foreground")}>
+                      {bm.monthYear}
+                    </Label>
+                  </div>
+                  <div className="text-sm">
+                    {bm.isFullyPaid ? (
+                      <span className="text-green-600 font-semibold flex items-center"><CheckCircle className="h-4 w-4 mr-1"/>Paid</span>
+                    ) : (
+                      <>
+                        <span className="text-destructive">Due: ₹{bm.remainingDue.toLocaleString()}</span>
+                        {bm.amountPaidThisMonth > 0 && (
+                          <span className="text-xs text-muted-foreground ml-1">(Paid: ₹{bm.amountPaidThisMonth.toLocaleString()})</span>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {currentlySelectedMonthsForPayment.length > 0 && (
               <Button 
-                onClick={() => onPayMonthly?.(student.id, dueAmount, course, `Full settlement of ${dueMonthsCount} month(s) dues up to ${format(new Date(), "MMMM yyyy")}.`)} 
+                onClick={handlePaySelected}
                 size="sm" 
-                className="animate-button-click"
-                disabled={!onPayMonthly}
+                className="w-full animate-button-click"
+                disabled={!onPaySelectedMonths || currentlySelectedMonthsForPayment.length === 0}
               >
-                <DollarSign className="mr-2 h-4 w-4" /> Pay Full Due ({dueMonthsCount})
+                <DollarSign className="mr-2 h-4 w-4" /> Pay Selected ({currentlySelectedMonthsForPayment.length} Month(s) - ₹{totalAmountForSelectedMonths.toLocaleString()})
               </Button>
+            )}
+            <div className="mt-3 flex space-x-2 items-end border-t pt-4">
               <div className="flex flex-col space-y-1">
-                <Label htmlFor={`partial-${student.id}`} className="text-xs">Partial Payment (₹)</Label>
+                <Label htmlFor={`partial-${student.id}`} className="text-xs">Partial Payment (for {oldestDueMonth || 'oldest due'})</Label>
                 <Input
                   id={`partial-${student.id}`}
                   type="number"
@@ -123,27 +201,33 @@ function StudentFeeItem({ student, course, onPayEnrollment, onPayMonthly, onPayP
               <Button
                 onClick={() => {
                   const amount = parseFloat(partialAmount);
-                  if (amount > 0 && amount < dueAmount) { 
-                    // For partial payment on billing page, apply to current month or oldest due if not specified.
-                    // It's better to use Record Payment on Student page for specific month allocation.
-                    // Here, we'll use current month for simplicity for this button.
-                    onPayPartial?.(student.id, amount, course, oldestDueMonth || format(new Date(), "MMMM yyyy"));
+                  const targetMonthForPartial = oldestDueMonth || format(new Date(), "MMMM yyyy");
+                  const monthDetail = billableMonths.find(bm => bm.monthYear === targetMonthForPartial);
+                  
+                  if (amount > 0 && monthDetail && amount < monthDetail.remainingDue) { 
+                    onPayPartial?.(student.id, amount, course, targetMonthForPartial);
                     setPartialAmount('');
-                  } else if (amount >= dueAmount) {
-                     toast({ title: "Info", description: "Partial payment cannot be equal to or exceed the full due amount. Use 'Pay Full Due' instead.", variant: "default"});
+                    setTimeout(calculateBillableMonths, 500);
+                  } else if (monthDetail && amount >= monthDetail.remainingDue) {
+                     toast({ title: "Info", description: "Partial payment cannot be equal to or exceed the due for this month. Use 'Pay Selected' for full month payment.", variant: "default"});
                   } else {
-                     toast({ title: "Error", description: "Invalid partial payment amount.", variant: "destructive"});
+                     toast({ title: "Error", description: "Invalid partial payment amount or no specific due month found for oldest.", variant: "destructive"});
                   }
                 }}
                 variant="outline"
                 size="sm"
-                disabled={!onPayPartial || parseFloat(partialAmount) <= 0 || parseFloat(partialAmount) >= dueAmount}
+                disabled={!onPayPartial || parseFloat(partialAmount) <= 0 || !oldestDueMonth}
                 className="animate-button-click"
               >
                 Pay Partial
               </Button>
             </div>
-          </>
+          </div>
+        )}
+         {type === 'due' && billableMonths.length === 0 && student.status === 'active' && (
+            <p className="text-green-600 flex items-center">
+                <CheckCircle className="mr-2 h-5 w-5" /> All monthly dues cleared for now.
+            </p>
         )}
         {type === 'paid' && (
           <p className="text-green-600 flex items-center">
@@ -157,7 +241,7 @@ function StudentFeeItem({ student, course, onPayEnrollment, onPayMonthly, onPayP
 
 
 export default function BillingPage() {
-  const { students, courses, addPayment, isLoading } = useAppContext();
+  const { students, courses, addPayment, isLoading, updateStudent } = useAppContext(); // Added updateStudent
   const { toast } = useToast(); 
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('enrollment');
@@ -170,27 +254,29 @@ export default function BillingPage() {
         type: 'enrollment',
         remarks: `Enrollment fee for ${course.name}`
       });
-      toast({ title: "Success", description: `${students.find(s=>s.id === studentId)?.name}'s enrollment fee paid.` });
+      // Student status updates to 'active' within addPayment if type is 'enrollment'
+      toast({ title: "Success", description: `${students.find(s=>s.id === studentId)?.name}'s enrollment fee paid. Status set to active.` });
     } catch (error: any) {
       toast({ title: "Error", description: `Failed to process enrollment payment: ${error.message}`, variant: "destructive" });
     }
   };
 
-  const handlePayMonthly = async (studentId: string, amount: number, course: Course, remarks: string) => {
+  const handlePaySelectedMonths = async (studentId: string, course: Course, monthsToPay: { monthYear: string, amount: number }[]) => {
+    if (monthsToPay.length === 0) return;
+    
     try {
-      await addPayment(studentId, {
-        date: new Date().toISOString(),
-        amount: amount, 
-        type: 'monthly', 
-        // For a bulk due payment, monthFor might be tricky.
-        // Setting to current month and relying on remarks.
-        // Ideally, this would create multiple payment records or a special type.
-        monthFor: format(new Date(), "MMMM yyyy"), 
-        remarks: remarks || `Payment for outstanding monthly fees for ${course.name}`
-      });
-      toast({ title: "Success", description: `Outstanding dues paid for ${students.find(s=>s.id === studentId)?.name}.` });
-    } catch (error: any)       {
-       toast({ title: "Error", description: `Failed to process monthly payment: ${error.message}`, variant: "destructive" });
+      for (const monthPayment of monthsToPay) {
+        await addPayment(studentId, {
+          date: new Date().toISOString(),
+          amount: monthPayment.amount, 
+          type: 'monthly', // Could be 'partial' if amount < course.monthlyFee, but 'monthly' is fine for clearing specific month dues
+          monthFor: monthPayment.monthYear, 
+          remarks: `Payment for ${monthPayment.monthYear} for ${course.name}`
+        });
+      }
+      toast({ title: "Success", description: `Payments recorded for ${monthsToPay.length} selected month(s) for ${students.find(s=>s.id === studentId)?.name}.` });
+    } catch (error: any) {
+       toast({ title: "Error", description: `Failed to process payment for selected months: ${error.message}`, variant: "destructive" });
     }
   };
   
@@ -203,7 +289,7 @@ export default function BillingPage() {
         monthFor: monthFor, 
         remarks: `Partial monthly fee for ${course.name} for ${monthFor}`
       });
-      toast({ title: "Success", description: `Partial payment recorded for ${students.find(s=>s.id === studentId)?.name}.` });
+      toast({ title: "Success", description: `Partial payment of ₹${amount} recorded for ${students.find(s=>s.id === studentId)?.name} for ${monthFor}.` });
     } catch (error: any) {
       toast({ title: "Error", description: `Failed to process partial payment: ${error.message}`, variant: "destructive" });
     }
@@ -211,8 +297,8 @@ export default function BillingPage() {
 
   const filteredStudents = students.filter(student => 
     student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    student.fatherName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    student.mobile.includes(searchTerm)
+    (student.fatherName && student.fatherName.toLowerCase().includes(searchTerm.toLowerCase())) ||
+    (student.mobile && student.mobile.includes(searchTerm))
   );
 
   const enrollmentPendingStudents = filteredStudents.filter(s => s.status === 'enrollment_pending');
@@ -222,33 +308,28 @@ export default function BillingPage() {
     const course = courses.find(c => c.id === s.courseId);
     if (!course) return false;
 
-    let totalDue = 0;
-    const currentDate = new Date();
-    currentDate.setHours(0,0,0,0);
-    const enrollmentDate = new Date(s.enrollmentDate);
-    enrollmentDate.setHours(0,0,0,0);
-        
-    let currentBillableMonthDate = addMonths(new Date(enrollmentDate.getFullYear(), enrollmentDate.getMonth(), 1), 1);
-    
-    while(isBefore(currentBillableMonthDate, currentDate) || isEqual(currentBillableMonthDate, new Date(currentDate.getFullYear(), currentDate.getMonth(), 1)) ) {
-        const monthStr = format(currentBillableMonthDate, "MMMM yyyy");
-        const paymentsForThisMonth = s.paymentHistory
-          .filter(p => (p.type === 'monthly' || p.type === 'partial') && p.monthFor === monthStr);
-        
-        const amountPaidForThisMonth = paymentsForThisMonth.reduce((sum, p) => sum + p.amount, 0);
+    const currentDate = startOfMonth(new Date());
+    const enrollmentDate = startOfMonth(new Date(s.enrollmentDate));
+    let currentBillableMonthDate = addMonths(enrollmentDate, 1);
 
-        if (amountPaidForThisMonth < course.monthlyFee) {
-          totalDue += (course.monthlyFee - amountPaidForThisMonth);
-        }
-        currentBillableMonthDate = addMonths(currentBillableMonthDate, 1);
+    while (isBefore(currentBillableMonthDate, currentDate) || isEqual(currentBillableMonthDate, currentDate)) {
+      const monthStr = format(currentBillableMonthDate, "MMMM yyyy");
+      const paymentsForThisMonth = s.paymentHistory
+        .filter(p => (p.type === 'monthly' || p.type === 'partial') && p.monthFor === monthStr);
+      const amountPaidForThisMonth = paymentsForThisMonth.reduce((sum, p) => sum + p.amount, 0);
+
+      if (amountPaidForThisMonth < course.monthlyFee) {
+        return true; // At least one month has a due
+      }
+      currentBillableMonthDate = addMonths(currentBillableMonthDate, 1);
     }
-    return totalDue > 0;
+    return false; // No dues found for any past billable month
   });
 
   const noDueStudents = filteredStudents.filter(s => 
     s.status === 'active' && 
-    !dueFeeStudents.find(ds => ds.id === s.id) &&
-    !enrollmentPendingStudents.find(es => es.id === s.id)
+    !dueFeeStudents.some(ds => ds.id === s.id) && // Check if not in dueFeeStudents array
+    !enrollmentPendingStudents.some(es => es.id === s.id)
   );
 
   if (isLoading) {
@@ -262,7 +343,7 @@ export default function BillingPage() {
           <CardContent>
             <div className="mx-auto bg-primary/10 p-3 rounded-full w-fit mb-3">
               {type === 'enrollment' && <AlertCircle className="h-10 w-10 text-primary" />}
-              {type === 'due' && <DollarSign className="h-10 w-10 text-primary" />}
+              {type === 'due' && <CalendarDays className="h-10 w-10 text-primary" />} {/* Changed icon for due */}
               {type === 'paid' && <CheckCircle className="h-10 w-10 text-primary" />}
             </div>
             <p className="text-muted-foreground">No students in this category {searchTerm && 'matching your search'}.</p>
@@ -278,7 +359,7 @@ export default function BillingPage() {
             student={student}
             course={courses.find(c => c.id === student.courseId)}
             onPayEnrollment={handlePayEnrollment}
-            onPayMonthly={handlePayMonthly}
+            onPaySelectedMonths={handlePaySelectedMonths}
             onPayPartial={handlePayPartial}
             type={type}
           />
@@ -309,7 +390,7 @@ export default function BillingPage() {
             <AlertCircle className="h-5 w-5" /><span>Enrollment Fee Pending ({enrollmentPendingStudents.length})</span>
           </TabsTrigger>
           <TabsTrigger value="due" className="flex items-center space-x-2 data-[state=active]:shadow-md">
-            <DollarSign className="h-5 w-5" /><span>Monthly Dues ({dueFeeStudents.length})</span>
+            <CalendarDays className="h-5 w-5" /><span>Monthly Dues ({dueFeeStudents.length})</span> {/* Changed icon for due */}
           </TabsTrigger>
           <TabsTrigger value="paid" className="flex items-center space-x-2 data-[state=active]:shadow-md">
             <CheckCircle className="h-5 w-5" /><span>No Dues ({noDueStudents.length})</span>
@@ -329,3 +410,4 @@ export default function BillingPage() {
     </>
   );
 }
+
