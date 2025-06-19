@@ -15,7 +15,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { format, addMonths, isBefore, isEqual, startOfMonth, getMonth, getYear, parse } from 'date-fns';
-import { cn } from '@/lib/utils'; // Added missing import
+import { cn } from '@/lib/utils';
 
 interface BillableMonth {
   monthYear: string; // "MMMM yyyy"
@@ -36,24 +36,29 @@ interface StudentFeeItemProps {
 }
 
 function StudentFeeItem({ student, course, onPayEnrollment, onPaySelectedMonths, onPayPartial, type }: StudentFeeItemProps) {
-  const [partialAmount, setPartialAmount] = useState('');
   const { toast } = useToast();
   const [billableMonths, setBillableMonths] = useState<BillableMonth[]>([]);
   const [selectedMonthsToPay, setSelectedMonthsToPay] = useState<Record<string, boolean>>({});
+  const [partialAmount, setPartialAmount] = useState('');
 
-  const calculateBillableMonths = useCallback(() => {
-    if (!course || student.status !== 'active') {
+  useEffect(() => {
+    if (!course || (type === 'due' && student.status !== 'active') || (type === 'enrollment' && student.status !== 'enrollment_pending') ) {
       setBillableMonths([]);
-      return { totalDue: 0, oldestDueMonth: '', monthsDetails: [] };
+      setSelectedMonthsToPay({});
+      return;
+    }
+     // If type is 'paid' and student is active, they should have no dues, so billableMonths can be empty.
+    if (type === 'paid' && student.status === 'active') {
+        setBillableMonths([]);
+        setSelectedMonthsToPay({});
+        return;
     }
 
-    const months: BillableMonth[] = [];
-    let totalOverallDue = 0;
-    let oldestDueMonthString = '';
 
+    const months: BillableMonth[] = [];
     const currentDate = startOfMonth(new Date());
     const enrollmentDate = startOfMonth(new Date(student.enrollmentDate));
-    let currentBillableMonthDate = addMonths(enrollmentDate, 1); // Monthly fees start from the month *after* enrollment
+    let currentBillableMonthDate = addMonths(enrollmentDate, 1); 
 
     while (isBefore(currentBillableMonthDate, currentDate) || isEqual(currentBillableMonthDate, currentDate)) {
       const monthStr = format(currentBillableMonthDate, "MMMM yyyy");
@@ -73,24 +78,14 @@ function StudentFeeItem({ student, course, onPayEnrollment, onPaySelectedMonths,
         isFullyPaid: isFullyPaid,
         remainingDue: remainingDueForThisMonth,
       });
-
-      if (!isFullyPaid) {
-        totalOverallDue += remainingDueForThisMonth;
-        if (!oldestDueMonthString) {
-          oldestDueMonthString = monthStr;
-        }
-      }
       currentBillableMonthDate = addMonths(currentBillableMonthDate, 1);
     }
-    setBillableMonths(months.sort((a,b) => a.dueDate.getTime() - b.dueDate.getTime())); // sort oldest first
-    return { totalDue: totalOverallDue, oldestDueMonth: oldestDueMonthString, monthsDetails: months };
-  }, [student, course]);
-
-
-  useEffect(() => {
-    calculateBillableMonths();
-    setSelectedMonthsToPay({}); // Reset selections when student/course changes
-  }, [calculateBillableMonths]);
+    
+    months.sort((a,b) => a.dueDate.getTime() - b.dueDate.getTime());
+    setBillableMonths(months);
+    setSelectedMonthsToPay({}); 
+  
+  }, [student, course, type]);
 
   const handleMonthSelectionChange = (monthYear: string, checked: boolean) => {
     setSelectedMonthsToPay(prev => ({ ...prev, [monthYear]: checked }));
@@ -111,14 +106,16 @@ function StudentFeeItem({ student, course, onPayEnrollment, onPaySelectedMonths,
       amount: bm.remainingDue,
     }));
     await onPaySelectedMonths(student.id, course, monthsToPayObjects);
-    setSelectedMonthsToPay({}); // Clear selection after payment
-    // Recalculate billable months to reflect payment
-    setTimeout(calculateBillableMonths, 500); // give a slight delay for context to update if needed
+    // Billable months will re-calculate due to student prop update from AppContext
   };
   
-  const { oldestDueMonth } = calculateBillableMonths(); // to get oldestDueMonth for partial payment
+  const oldestDueMonthData = billableMonths.find(bm => !bm.isFullyPaid);
+  const oldestDueMonthForPartial = oldestDueMonthData ? oldestDueMonthData.monthYear : '';
 
   if (!course) return null;
+  if (type === 'enrollment' && student.status !== 'enrollment_pending') return null;
+  if ((type === 'due' || type === 'paid') && student.status !== 'active') return null;
+  // For 'paid' tab, if student is active but no billable months (meaning all clear), it's handled by renderStudentList logic
 
   return (
     <Card className="mb-6 shadow-md hover:shadow-lg transition-shadow">
@@ -189,7 +186,7 @@ function StudentFeeItem({ student, course, onPayEnrollment, onPaySelectedMonths,
             )}
             <div className="mt-3 flex space-x-2 items-end border-t pt-4">
               <div className="flex flex-col space-y-1">
-                <Label htmlFor={`partial-${student.id}`} className="text-xs">Partial Payment (for {oldestDueMonth || 'oldest due'})</Label>
+                <Label htmlFor={`partial-${student.id}`} className="text-xs">Partial Payment (for {oldestDueMonthForPartial || 'oldest due'})</Label>
                 <Input
                   id={`partial-${student.id}`}
                   type="number"
@@ -202,22 +199,25 @@ function StudentFeeItem({ student, course, onPayEnrollment, onPaySelectedMonths,
               <Button
                 onClick={() => {
                   const amount = parseFloat(partialAmount);
-                  const targetMonthForPartial = oldestDueMonth || format(new Date(), "MMMM yyyy");
-                  const monthDetail = billableMonths.find(bm => bm.monthYear === targetMonthForPartial);
+                  const targetMonthForPartial = oldestDueMonthForPartial || format(addMonths(new Date(student.enrollmentDate),1), "MMMM yyyy"); // Sensible fallback
+                  const monthDetail = billableMonths.find(bm => bm.monthYear === targetMonthForPartial && !bm.isFullyPaid);
                   
                   if (amount > 0 && monthDetail && amount < monthDetail.remainingDue) { 
                     onPayPartial?.(student.id, amount, course, targetMonthForPartial);
                     setPartialAmount('');
-                    setTimeout(calculateBillableMonths, 500);
                   } else if (monthDetail && amount >= monthDetail.remainingDue) {
                      toast({ title: "Info", description: "Partial payment cannot be equal to or exceed the due for this month. Use 'Pay Selected' for full month payment.", variant: "default"});
+                  } else if (!monthDetail && amount > 0 && type === 'due') {
+                     toast({ title: "Info", description: "Student has no current specific dues for this partial payment or the oldest due month is already covered.", variant: "default"});
+                  } else if (amount <= 0) {
+                     toast({ title: "Error", description: "Partial payment amount must be positive.", variant: "destructive"});
                   } else {
-                     toast({ title: "Error", description: "Invalid partial payment amount or no specific due month found for oldest.", variant: "destructive"});
+                     toast({ title: "Error", description: "Invalid partial payment attempt or no applicable due month.", variant: "destructive"});
                   }
                 }}
                 variant="outline"
                 size="sm"
-                disabled={!onPayPartial || parseFloat(partialAmount) <= 0 || !oldestDueMonth}
+                disabled={!onPayPartial || parseFloat(partialAmount) <= 0 || (type==='due' && !oldestDueMonthForPartial)}
                 className="animate-button-click"
               >
                 Pay Partial
@@ -225,14 +225,14 @@ function StudentFeeItem({ student, course, onPayEnrollment, onPaySelectedMonths,
             </div>
           </div>
         )}
-         {type === 'due' && billableMonths.length === 0 && student.status === 'active' && (
+         {type === 'due' && billableMonths.every(bm => bm.isFullyPaid) && student.status === 'active' && ( // Check if all billable months are paid
             <p className="text-green-600 flex items-center">
                 <CheckCircle className="mr-2 h-5 w-5" /> All monthly dues cleared for now.
             </p>
         )}
-        {type === 'paid' && (
+        {type === 'paid' && ( // This implies student is active and has no dues (already filtered by noDueStudents)
           <p className="text-green-600 flex items-center">
-            <CheckCircle className="mr-2 h-5 w-5" /> All dues cleared for now.
+            <CheckCircle className="mr-2 h-5 w-5" /> All dues cleared.
           </p>
         )}
       </CardContent>
@@ -242,7 +242,7 @@ function StudentFeeItem({ student, course, onPayEnrollment, onPaySelectedMonths,
 
 
 export default function BillingPage() {
-  const { students, courses, addPayment, isLoading, updateStudent } = useAppContext(); // Added updateStudent
+  const { students, courses, addPayment, isLoading, updateStudent } = useAppContext(); 
   const { toast } = useToast(); 
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('due');
@@ -255,7 +255,6 @@ export default function BillingPage() {
         type: 'enrollment',
         remarks: `Enrollment fee for ${course.name}`
       });
-      // Student status updates to 'active' within addPayment if type is 'enrollment'
       toast({ title: "Success", description: `${students.find(s=>s.id === studentId)?.name}'s enrollment fee paid. Status set to active.` });
     } catch (error: any) {
       toast({ title: "Error", description: `Failed to process enrollment payment: ${error.message}`, variant: "destructive" });
@@ -270,7 +269,7 @@ export default function BillingPage() {
         await addPayment(studentId, {
           date: new Date().toISOString(),
           amount: monthPayment.amount, 
-          type: 'monthly', // Could be 'partial' if amount < course.monthlyFee, but 'monthly' is fine for clearing specific month dues
+          type: 'monthly', 
           monthFor: monthPayment.monthYear, 
           remarks: `Payment for ${monthPayment.monthYear} for ${course.name}`
         });
@@ -320,16 +319,16 @@ export default function BillingPage() {
       const amountPaidForThisMonth = paymentsForThisMonth.reduce((sum, p) => sum + p.amount, 0);
 
       if (amountPaidForThisMonth < course.monthlyFee) {
-        return true; // At least one month has a due
+        return true; 
       }
       currentBillableMonthDate = addMonths(currentBillableMonthDate, 1);
     }
-    return false; // No dues found for any past billable month
+    return false; 
   });
 
   const noDueStudents = filteredStudents.filter(s => 
     s.status === 'active' && 
-    !dueFeeStudents.some(ds => ds.id === s.id) && // Check if not in dueFeeStudents array
+    !dueFeeStudents.some(ds => ds.id === s.id) && 
     !enrollmentPendingStudents.some(es => es.id === s.id)
   );
 
@@ -344,7 +343,7 @@ export default function BillingPage() {
           <CardContent>
             <div className="mx-auto bg-primary/10 p-3 rounded-full w-fit mb-3">
               {type === 'enrollment' && <AlertCircle className="h-10 w-10 text-primary" />}
-              {type === 'due' && <CalendarDays className="h-10 w-10 text-primary" />} {/* Changed icon for due */}
+              {type === 'due' && <CalendarDays className="h-10 w-10 text-primary" />}
               {type === 'paid' && <CheckCircle className="h-10 w-10 text-primary" />}
             </div>
             <p className="text-muted-foreground">No students in this category {searchTerm && 'matching your search'}.</p>
@@ -391,7 +390,7 @@ export default function BillingPage() {
             <AlertCircle className="h-5 w-5" /><span>Enrollment Fee Pending ({enrollmentPendingStudents.length})</span>
           </TabsTrigger>
           <TabsTrigger value="due" className="flex items-center space-x-2 data-[state=active]:shadow-md">
-            <CalendarDays className="h-5 w-5" /><span>Monthly Dues ({dueFeeStudents.length})</span> {/* Changed icon for due */}
+            <CalendarDays className="h-5 w-5" /><span>Monthly Dues ({dueFeeStudents.length})</span>
           </TabsTrigger>
           <TabsTrigger value="paid" className="flex items-center space-x-2 data-[state=active]:shadow-md">
             <CheckCircle className="h-5 w-5" /><span>No Dues ({noDueStudents.length})</span>
@@ -411,4 +410,3 @@ export default function BillingPage() {
     </>
   );
 }
-
