@@ -1,7 +1,7 @@
 
 "use client";
 import React, { useState, useEffect } from 'react';
-import { PlusCircle, User, Users, MoreVertical, CreditCard, History, DollarSign } from 'lucide-react';
+import { PlusCircle, User, Users, MoreVertical, CreditCard, History, DollarSign, CalendarCheck2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -15,12 +15,15 @@ import { DateOfBirthPicker } from '@/components/students/DateOfBirthPicker';
 import { EnrollmentDateDropdownPicker } from '@/components/students/EnrollmentDateDropdownPicker';
 import { DOB_DAYS, DOB_MONTHS, DOB_YEARS, COURSE_DURATION_UNITS, MOBILE_REGEX, AADHAR_REGEX } from '@/lib/constants';
 import { useToast } from '@/hooks/use-toast';
-import { format } from 'date-fns';
+import { format, addMonths, isBefore, isEqual, startOfMonth, parse } from 'date-fns';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import Link from 'next/link';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
+import { cn } from '@/lib/utils';
+
 
 const today = new Date();
 const initialStudentFormState: StudentFormData = {
@@ -41,18 +44,27 @@ const initialStudentFormState: StudentFormData = {
 
 type PaymentType = 'enrollment' | 'monthly' | 'partial';
 
+interface BillableMonthForDialog {
+  monthYear: string; // "MMMM yyyy"
+  dueDate: Date;
+  amountPaidThisMonth: number;
+  amountDueThisMonth: number; // Full monthly fee
+  isFullyPaid: boolean;
+  remainingDue: number;
+}
+
 const initialPaymentFormState = {
   type: 'monthly' as PaymentType,
   amount: 0,
-  monthFor: format(new Date(), "MMMM yyyy"), // Default to current month and year
+  monthFor: format(new Date(), "MMMM yyyy"),
   remarks: '',
 };
 
 export default function StudentsPage() {
-  const { students, courses, addStudent, isLoading, addPayment, updateStudent } = useAppContext();
+  const { students, courses, addStudent, isLoading, addPayment } = useAppContext();
   const [isAddStudentDialogOpen, setIsAddStudentDialogOpen] = useState(false);
   const [studentForm, setStudentForm] = useState<StudentFormData>(initialStudentFormState);
-  const [editingStudent, setEditingStudent] = useState<Student | null>(null); // Not used yet, but for future edit functionality
+  const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [selectedCourseDetails, setSelectedCourseDetails] = useState<{enrollmentFee: number, monthlyFee: number} | null>(null);
   const { toast } = useToast();
 
@@ -61,6 +73,9 @@ export default function StudentsPage() {
   const [recordingPaymentForStudent, setRecordingPaymentForStudent] = useState<Student | null>(null);
   const [paymentForm, setPaymentForm] = useState(initialPaymentFormState);
   
+  const [billableMonthsForDialog, setBillableMonthsForDialog] = useState<BillableMonthForDialog[]>([]);
+  const [selectedMonthsToPayInDialog, setSelectedMonthsToPayInDialog] = useState<Record<string, boolean>>({});
+
   const studentCourseForPayment = recordingPaymentForStudent ? courses.find(c => c.id === recordingPaymentForStudent.courseId) : null;
 
   useEffect(() => {
@@ -85,18 +100,50 @@ export default function StudentsPage() {
           monthFor: '', 
           remarks: `Enrollment fee for ${studentCourseForPayment.name}`,
         });
-      } else {
-         setPaymentForm({ // Default to monthly for active students
+        setBillableMonthsForDialog([]);
+        setSelectedMonthsToPayInDialog({});
+      } else { // Active or completed_unpaid
+         setPaymentForm({ 
           type: 'monthly', 
-          amount: studentCourseForPayment.monthlyFee, // Default to full monthly fee
-          monthFor: format(new Date(), "MMMM yyyy"), // Default to current month
+          amount: 0, // Amount will be derived from selected months for 'monthly'
+          monthFor: format(new Date(), "MMMM yyyy"), 
           remarks: `Monthly fee for ${studentCourseForPayment.name}`,
         });
+        // Calculate billable months for the dialog if type is 'monthly'
+        const months: BillableMonthForDialog[] = [];
+        const currentDate = startOfMonth(new Date());
+        const enrollmentDate = startOfMonth(new Date(recordingPaymentForStudent.enrollmentDate));
+        let currentBillableMonthDate = addMonths(enrollmentDate, 1); 
+
+        while (isBefore(currentBillableMonthDate, currentDate) || isEqual(currentBillableMonthDate, currentDate)) {
+          const monthStr = format(currentBillableMonthDate, "MMMM yyyy");
+          const paymentsForThisMonth = recordingPaymentForStudent.paymentHistory.filter(p => 
+            (p.type === 'monthly' || p.type === 'partial') && p.monthFor === monthStr
+          );
+          const amountPaidForThisMonth = paymentsForThisMonth.reduce((sum, p) => sum + p.amount, 0);
+          const remainingDueForThisMonth = Math.max(0, studentCourseForPayment.monthlyFee - amountPaidForThisMonth);
+          
+          months.push({
+            monthYear: monthStr,
+            dueDate: new Date(currentBillableMonthDate),
+            amountPaidThisMonth: amountPaidForThisMonth,
+            amountDueThisMonth: studentCourseForPayment.monthlyFee,
+            isFullyPaid: remainingDueForThisMonth <= 0,
+            remainingDue: remainingDueForThisMonth,
+          });
+          currentBillableMonthDate = addMonths(currentBillableMonthDate, 1);
+        }
+        months.sort((a,b) => a.dueDate.getTime() - b.dueDate.getTime());
+        setBillableMonthsForDialog(months);
+        setSelectedMonthsToPayInDialog({});
       }
     } else {
       setPaymentForm(initialPaymentFormState);
+      setBillableMonthsForDialog([]);
+      setSelectedMonthsToPayInDialog({});
     }
   }, [recordingPaymentForStudent, studentCourseForPayment]);
+
 
   const handleStudentFormInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -175,7 +222,7 @@ export default function StudentsPage() {
 
   const openRecordPaymentDialog = (student: Student) => {
     setRecordingPaymentForStudent(student);
-    // useEffect will set paymentForm based on student status
+    // useEffect will set paymentForm and billableMonthsForDialog
     setIsRecordPaymentDialogOpen(true);
   };
   
@@ -188,18 +235,21 @@ export default function StudentsPage() {
         if (newType === 'enrollment' && studentCourseForPayment && recordingPaymentForStudent?.status === 'enrollment_pending') {
             newAmount = studentCourseForPayment.enrollmentFee;
         } else if (newType === 'monthly' && studentCourseForPayment) {
-             newAmount = studentCourseForPayment.monthlyFee; // Default to full monthly for 'monthly'
+             newAmount = 0; // For monthly, amount is derived from selected months
         } else if (newType === 'partial' && studentCourseForPayment) {
-            // For partial, keep existing amount or clear it if user is expected to type
             newAmount = paymentForm.amount > 0 && paymentForm.type === 'partial' ? paymentForm.amount : 0; 
         }
          setPaymentForm(prev => ({ ...prev, type: newType, amount: newAmount, monthFor: newType === 'enrollment' ? '' : prev.monthFor || format(new Date(), "MMMM yyyy") }));
     } else if (name === 'amount') {
         setPaymentForm(prev => ({ ...prev, amount: parseFloat(value) || 0 }));
     }
-     else { // For monthFor and remarks
+     else { 
         setPaymentForm(prev => ({ ...prev, [name]: value }));
     }
+  };
+
+  const handleMonthSelectionInDialog = (monthYear: string, checked: boolean) => {
+    setSelectedMonthsToPayInDialog(prev => ({ ...prev, [monthYear]: checked }));
   };
 
   const handleRecordPaymentSubmit = async (e: React.FormEvent) => {
@@ -208,35 +258,59 @@ export default function StudentsPage() {
       toast({ title: "Error", description: "Student or course data missing.", variant: "destructive" });
       return;
     }
-    if (paymentForm.amount <= 0) {
-      toast({ title: "Error", description: "Payment amount must be greater than zero.", variant: "destructive" });
-      return;
-    }
-    if ((paymentForm.type === 'monthly' || paymentForm.type === 'partial') && !paymentForm.monthFor.trim()) {
-      toast({ title: "Error", description: "Please specify 'Month For' (e.g., July 2024) for monthly/partial payments.", variant: "destructive" });
-      return;
-    }
-    // Validate monthFor format (simple check)
-    if ((paymentForm.type === 'monthly' || paymentForm.type === 'partial') && !/^[A-Za-z]+ [0-9]{4}$/.test(paymentForm.monthFor.trim())) {
-        toast({ title: "Error", description: "Invalid 'Month For' format. Expected 'Month Year' (e.g., July 2024).", variant: "destructive" });
-        return;
-    }
-
-
-    const paymentDetails: Omit<PaymentRecord, 'id'> = {
-      date: new Date().toISOString(),
-      amount: paymentForm.amount,
-      type: paymentForm.type,
-      monthFor: (paymentForm.type === 'monthly' || paymentForm.type === 'partial') ? paymentForm.monthFor.trim() : undefined,
-      remarks: paymentForm.remarks || `${paymentForm.type} fee for ${studentCourseForPayment.name}${paymentForm.monthFor ? ` for ${paymentForm.monthFor.trim()}` : ''}`,
-    };
 
     try {
-      await addPayment(recordingPaymentForStudent.id, paymentDetails);
-      toast({ title: "Success", description: `Payment of ₹${paymentForm.amount} recorded for ${recordingPaymentForStudent.name}.` });
+      if (paymentForm.type === 'monthly') {
+        const monthsToPayInDialog = billableMonthsForDialog.filter(
+          bm => selectedMonthsToPayInDialog[bm.monthYear] && !bm.isFullyPaid && bm.remainingDue > 0
+        );
+
+        if (monthsToPayInDialog.length === 0) {
+          toast({ title: "Info", description: "No months selected for payment or all selected months are already paid/have no dues.", variant: "default" });
+          return;
+        }
+
+        for (const monthPayment of monthsToPayInDialog) {
+          await addPayment(recordingPaymentForStudent.id, {
+            date: new Date().toISOString(),
+            amount: monthPayment.remainingDue, 
+            type: 'monthly', 
+            monthFor: monthPayment.monthYear, 
+            remarks: paymentForm.remarks || `Payment for ${monthPayment.monthYear} for ${studentCourseForPayment.name}`
+          });
+        }
+        toast({ title: "Success", description: `Payments recorded for ${monthsToPayInDialog.length} selected month(s) for ${recordingPaymentForStudent.name}.` });
+
+      } else { // Enrollment or Partial
+        if (paymentForm.amount <= 0) {
+          toast({ title: "Error", description: "Payment amount must be greater than zero.", variant: "destructive" });
+          return;
+        }
+        if (paymentForm.type === 'partial' && !paymentForm.monthFor.trim()) {
+          toast({ title: "Error", description: "Please specify 'Month For' (e.g., July 2024) for partial payments.", variant: "destructive" });
+          return;
+        }
+        if (paymentForm.type === 'partial' && !/^[A-Za-z]+ [0-9]{4}$/.test(paymentForm.monthFor.trim())) {
+            toast({ title: "Error", description: "Invalid 'Month For' format. Expected 'Month Year' (e.g., July 2024).", variant: "destructive" });
+            return;
+        }
+
+        const paymentDetails: Omit<PaymentRecord, 'id'> = {
+          date: new Date().toISOString(),
+          amount: paymentForm.amount,
+          type: paymentForm.type,
+          monthFor: paymentForm.type === 'partial' ? paymentForm.monthFor.trim() : undefined,
+          remarks: paymentForm.remarks || `${paymentForm.type} fee for ${studentCourseForPayment.name}${paymentForm.monthFor && paymentForm.type === 'partial' ? ` for ${paymentForm.monthFor.trim()}` : ''}`,
+        };
+        await addPayment(recordingPaymentForStudent.id, paymentDetails);
+        toast({ title: "Success", description: `${paymentForm.type.charAt(0).toUpperCase() + paymentForm.type.slice(1)} payment of ₹${paymentForm.amount} recorded for ${recordingPaymentForStudent.name}.` });
+      }
+      
       setIsRecordPaymentDialogOpen(false);
-      setRecordingPaymentForStudent(null);
+      setRecordingPaymentForStudent(null); // This will trigger useEffect to reset paymentForm & billableMonths
       setPaymentForm(initialPaymentFormState);
+      setSelectedMonthsToPayInDialog({});
+
     } catch (error: any) {
       console.error("Failed to record payment:", error);
       toast({ title: "Error", description: `Failed to record payment: ${error.message}`, variant: "destructive" });
@@ -381,6 +455,14 @@ export default function StudentsPage() {
   const renderRecordPaymentDialog = () => {
     if (!recordingPaymentForStudent || !studentCourseForPayment) return null;
 
+    const currentlySelectedMonthsForPaymentInDialog = billableMonthsForDialog.filter(
+        bm => selectedMonthsToPayInDialog[bm.monthYear] && !bm.isFullyPaid
+    );
+    const totalAmountForSelectedMonthsInDialog = currentlySelectedMonthsForPaymentInDialog.reduce(
+        (sum, bm) => sum + bm.remainingDue, 0
+    );
+
+
     return (
         <Dialog open={isRecordPaymentDialogOpen} onOpenChange={() => { setIsRecordPaymentDialogOpen(false); setRecordingPaymentForStudent(null); }}>
             <DialogContent className="sm:max-w-md shadow-2xl rounded-lg">
@@ -388,6 +470,7 @@ export default function StudentsPage() {
                     <DialogTitle className="font-headline text-primary">Record Payment for {recordingPaymentForStudent.name}</DialogTitle>
                     <CardDescription>Course: {studentCourseForPayment.name}</CardDescription>
                 </DialogHeader>
+                <ScrollArea className="max-h-[60vh] pr-2">
                 <form onSubmit={handleRecordPaymentSubmit} className="space-y-4 py-4">
                     <div>
                         <Label htmlFor="paymentType">Payment Type</Label>
@@ -405,39 +488,101 @@ export default function StudentsPage() {
                                 )}
                                 {(recordingPaymentForStudent.status === 'active' || recordingPaymentForStudent.status === 'completed_unpaid') && (
                                   <>
-                                    <SelectItem value="monthly">Monthly Fee</SelectItem>
-                                    <SelectItem value="partial">Partial Fee</SelectItem>
+                                    <SelectItem value="monthly">Monthly Fee (Select Months)</SelectItem>
+                                    <SelectItem value="partial">Partial Fee (Single Month)</SelectItem>
                                   </>
                                 )}
                             </SelectContent>
                         </Select>
                     </div>
-                    <div>
-                        <Label htmlFor="paymentAmount">Amount (₹)</Label>
-                        <Input 
-                            id="paymentAmount" 
-                            name="amount" 
-                            type="number" 
-                            value={paymentForm.amount} 
-                            onChange={handlePaymentFormChange}
-                            disabled={paymentForm.type === 'enrollment'} 
-                            required 
-                        />
-                    </div>
-                    {(paymentForm.type === 'monthly' || paymentForm.type === 'partial') && (
+
+                    {paymentForm.type === 'enrollment' && (
                         <div>
-                            <Label htmlFor="paymentMonthFor">Month For (e.g., July 2024)</Label>
+                            <Label htmlFor="paymentAmountEnrollment">Amount (₹)</Label>
                             <Input 
-                                id="paymentMonthFor" 
-                                name="monthFor" 
-                                type="text" 
-                                value={paymentForm.monthFor} 
+                                id="paymentAmountEnrollment" 
+                                name="amount" 
+                                type="number" 
+                                value={paymentForm.amount} 
                                 onChange={handlePaymentFormChange}
-                                placeholder="MMMM YYYY" 
-                                required={paymentForm.type === 'monthly' || paymentForm.type === 'partial'}
+                                disabled // Enrollment fee is fixed
+                                required 
                             />
                         </div>
                     )}
+
+                    {paymentForm.type === 'partial' && (
+                        <>
+                            <div>
+                                <Label htmlFor="paymentAmountPartial">Amount (₹)</Label>
+                                <Input 
+                                    id="paymentAmountPartial" 
+                                    name="amount" 
+                                    type="number" 
+                                    value={paymentForm.amount} 
+                                    onChange={handlePaymentFormChange}
+                                    required 
+                                />
+                            </div>
+                            <div>
+                                <Label htmlFor="paymentMonthForPartial">Month For (e.g., July 2024)</Label>
+                                <Input 
+                                    id="paymentMonthForPartial" 
+                                    name="monthFor" 
+                                    type="text" 
+                                    value={paymentForm.monthFor} 
+                                    onChange={handlePaymentFormChange}
+                                    placeholder="MMMM YYYY" 
+                                    required
+                                />
+                            </div>
+                        </>
+                    )}
+                    
+                    {paymentForm.type === 'monthly' && billableMonthsForDialog.length > 0 && (
+                        <div className="space-y-2 border rounded-md p-3 bg-muted/30">
+                            <Label className="font-medium text-sm">Select Months to Pay:</Label>
+                             <ScrollArea className="h-48 pr-2">
+                                {billableMonthsForDialog.map((bm) => (
+                                <div key={bm.monthYear} className="flex items-center justify-between p-2 rounded-md bg-background shadow-sm mb-1">
+                                    <div className="flex items-center space-x-3">
+                                    <Checkbox
+                                        id={`dialog-${recordingPaymentForStudent.id}-${bm.monthYear}`}
+                                        checked={bm.isFullyPaid || !!selectedMonthsToPayInDialog[bm.monthYear]}
+                                        disabled={bm.isFullyPaid || bm.remainingDue <= 0}
+                                        onCheckedChange={(checked) => handleMonthSelectionInDialog(bm.monthYear, !!checked)}
+                                    />
+                                    <Label htmlFor={`dialog-${recordingPaymentForStudent.id}-${bm.monthYear}`} className={cn("text-xs", bm.isFullyPaid ? "text-green-600" : "text-foreground")}>
+                                        {bm.monthYear}
+                                    </Label>
+                                    </div>
+                                    <div className="text-xs">
+                                    {bm.isFullyPaid ? (
+                                        <span className="text-green-600 font-semibold flex items-center"><CheckCircle className="h-3 w-3 mr-1"/>Paid</span>
+                                    ) : (
+                                        <>
+                                        <span className={bm.remainingDue > 0 ? "text-destructive" : "text-muted-foreground"}>Due: ₹{bm.remainingDue.toLocaleString()}</span>
+                                        {bm.amountPaidThisMonth > 0 && (
+                                            <span className="text-xs text-muted-foreground ml-1">(Paid: ₹{bm.amountPaidThisMonth.toLocaleString()})</span>
+                                        )}
+                                        </>
+                                    )}
+                                    </div>
+                                </div>
+                                ))}
+                            </ScrollArea>
+                            {currentlySelectedMonthsForPaymentInDialog.length > 0 && (
+                                <div className="text-sm font-medium pt-2 border-t">
+                                    Total for Selected: ₹{totalAmountForSelectedMonthsInDialog.toLocaleString()}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                     {paymentForm.type === 'monthly' && billableMonthsForDialog.length === 0 && (
+                        <p className="text-sm text-muted-foreground p-3 border rounded-md bg-muted/30">No past due monthly fees found for this student.</p>
+                    )}
+
+
                     <div>
                         <Label htmlFor="paymentRemarks">Remarks (Optional)</Label>
                         <Textarea 
@@ -452,9 +597,19 @@ export default function StudentsPage() {
                         <DialogClose asChild>
                             <Button type="button" variant="outline">Cancel</Button>
                         </DialogClose>
-                        <Button type="submit">Record Payment</Button>
+                        <Button 
+                            type="submit"
+                            disabled={
+                                (paymentForm.type === 'enrollment' && paymentForm.amount <= 0) ||
+                                (paymentForm.type === 'partial' && paymentForm.amount <= 0) ||
+                                (paymentForm.type === 'monthly' && currentlySelectedMonthsForPaymentInDialog.length === 0)
+                            }
+                        >
+                           {paymentForm.type === 'monthly' ? 'Record Selected Month(s)' : 'Record Payment'}
+                        </Button>
                     </DialogFooter>
                 </form>
+                </ScrollArea>
             </DialogContent>
         </Dialog>
     );
@@ -470,7 +625,9 @@ export default function StudentsPage() {
     );
   }
 
-  if (students.filter(s => s.status === 'active' || s.status === 'enrollment_pending' || s.status === 'completed_unpaid').length === 0 && !isLoading) {
+  const activeStudentsList = students.filter(s => s.status === 'active' || s.status === 'enrollment_pending' || s.status === 'completed_unpaid');
+
+  if (activeStudentsList.length === 0 && !isLoading) {
     return (
       <>
         {pageHeader}
@@ -500,7 +657,7 @@ export default function StudentsPage() {
       {pageHeader}
       <ScrollArea className="h-[calc(100vh-20rem)]">
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 animate-slide-in">
-          {students.filter(s => s.status === 'active' || s.status === 'enrollment_pending' || s.status === 'completed_unpaid').map((student) => {
+          {activeStudentsList.map((student) => {
             const course = courses.find(c => c.id === student.courseId);
             const enrollmentDateObj = new Date(student.enrollmentDate);
             const formattedEnrollmentDate = !isNaN(enrollmentDateObj.getTime()) ? enrollmentDateObj.toLocaleDateString() : 'N/A';
