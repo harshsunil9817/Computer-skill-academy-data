@@ -13,32 +13,83 @@ import { useToast } from '@/hooks/use-toast';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
-import { format, addMonths, isBefore, isEqual, startOfMonth, getMonth, getYear, parse } from 'date-fns';
-import { cn } from '@/lib/utils';
+import { format, addMonths, isBefore, isEqual, startOfMonth, parse } from 'date-fns';
+import { cn } from '@/lib/utils'; // Ensure cn is imported
+
+interface BillableMonthDetail {
+  monthYear: string; // "MMMM yyyy"
+  dueDate: Date;
+  amountPaidThisMonth: number;
+  feeForMonth: number; // Full monthly fee for this course
+  isFullyPaid: boolean;
+  remainingDue: number;
+}
 
 interface StudentFeeItemProps {
   student: Student;
   course?: Course;
   onPayEnrollment?: (studentId: string, course: Course) => Promise<void>;
-  onPayFullMonthlyDues?: (studentId: string, course: Course, totalDue: number) => Promise<void>;
+  onPayFullMonthlyDues?: (studentId: string, course: Course, billableMonths: BillableMonthDetail[]) => Promise<void>;
   onPayPartialMonthlyDues?: (studentId: string, course: Course, amount: number, oldestDueMonth: string) => Promise<void>;
   type: 'enrollment' | 'due' | 'paid';
-  totalMonthlyDuesForStudent: number;
-  oldestUnpaidMonthForStudent: string;
+  // totalMonthlyDuesForStudent is now calculated within StudentFeeItem based on billableMonths
+  // oldestUnpaidMonthForStudent is now calculated within StudentFeeItem
 }
 
-function StudentFeeItem({ 
-  student, 
-  course, 
-  onPayEnrollment, 
+function StudentFeeItem({
+  student,
+  course,
+  onPayEnrollment,
   onPayFullMonthlyDues,
   onPayPartialMonthlyDues,
   type,
-  totalMonthlyDuesForStudent,
-  oldestUnpaidMonthForStudent
 }: StudentFeeItemProps) {
   const { toast } = useToast();
   const [partialAmount, setPartialAmount] = useState('');
+  const [billableMonths, setBillableMonths] = useState<BillableMonthDetail[]>([]);
+  const [totalMonthlyDuesForStudent, setTotalMonthlyDuesForStudent] = useState(0);
+  const [oldestDueMonthForPartial, setOldestDueMonthForPartial] = useState("");
+
+  useEffect(() => {
+    if (course && student.status === 'active') {
+      const months: BillableMonthDetail[] = [];
+      const currentDate = startOfMonth(new Date());
+      const enrollmentDate = startOfMonth(new Date(student.enrollmentDate));
+      let currentBillableMonthDate = addMonths(enrollmentDate, 1); // Billing starts month after enrollment
+
+      while (isBefore(currentBillableMonthDate, currentDate) || isEqual(currentBillableMonthDate, currentDate)) {
+        const monthStr = format(currentBillableMonthDate, "MMMM yyyy");
+        const paymentsForThisMonth = student.paymentHistory.filter(p =>
+          (p.type === 'monthly' || p.type === 'partial') && p.monthFor === monthStr
+        );
+        const amountPaidForThisMonth = paymentsForThisMonth.reduce((sum, p) => sum + p.amount, 0);
+        const remainingDueForThisMonth = Math.max(0, course.monthlyFee - amountPaidForThisMonth);
+
+        months.push({
+          monthYear: monthStr,
+          dueDate: new Date(currentBillableMonthDate),
+          amountPaidThisMonth: amountPaidForThisMonth,
+          feeForMonth: course.monthlyFee,
+          isFullyPaid: remainingDueForThisMonth <= 0,
+          remainingDue: remainingDueForThisMonth,
+        });
+        currentBillableMonthDate = addMonths(currentBillableMonthDate, 1);
+      }
+      months.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
+      setBillableMonths(months);
+
+      const totalDue = months.reduce((sum, m) => sum + m.remainingDue, 0);
+      setTotalMonthlyDuesForStudent(totalDue);
+
+      const firstUnpaid = months.find(m => !m.isFullyPaid);
+      setOldestDueMonthForPartial(firstUnpaid ? firstUnpaid.monthYear : "");
+
+    } else {
+      setBillableMonths([]);
+      setTotalMonthlyDuesForStudent(0);
+      setOldestDueMonthForPartial("");
+    }
+  }, [student, course, student.paymentHistory]); // student.paymentHistory is important here
 
   if (!course) return null;
   if (type === 'enrollment' && student.status !== 'enrollment_pending') return null;
@@ -46,7 +97,6 @@ function StudentFeeItem({
   if (type === 'paid' && student.status !== 'active') return null;
   if (type === 'due' && student.status === 'active' && totalMonthlyDuesForStudent <= 0) return null;
   if (type === 'paid' && student.status === 'active' && totalMonthlyDuesForStudent > 0) return null;
-
 
   return (
     <Card className="mb-6 shadow-md hover:shadow-lg transition-shadow">
@@ -69,9 +119,9 @@ function StudentFeeItem({
         {type === 'enrollment' && student.status === 'enrollment_pending' && (
           <>
             <p>Enrollment Fee Due: <span className="font-semibold">₹{course.enrollmentFee.toLocaleString()}</span></p>
-            <Button 
-              onClick={() => onPayEnrollment?.(student.id, course)} 
-              size="sm" 
+            <Button
+              onClick={() => onPayEnrollment?.(student.id, course)}
+              size="sm"
               className="mt-2 animate-button-click"
               disabled={!onPayEnrollment}
             >
@@ -82,18 +132,22 @@ function StudentFeeItem({
         {type === 'due' && student.status === 'active' && totalMonthlyDuesForStudent > 0 && (
           <div className="space-y-4">
             <p>Total Monthly Dues: <span className="font-semibold text-destructive">₹{totalMonthlyDuesForStudent.toLocaleString()}</span></p>
-            <Button 
-              onClick={() => onPayFullMonthlyDues?.(student.id, course, totalMonthlyDuesForStudent)}
-              size="sm" 
+            <Button
+              onClick={() => {
+                if (onPayFullMonthlyDues && course) {
+                  onPayFullMonthlyDues(student.id, course, billableMonths.filter(bm => bm.remainingDue > 0));
+                }
+              }}
+              size="sm"
               className="w-full animate-button-click"
-              disabled={!onPayFullMonthlyDues || totalMonthlyDuesForStudent <=0}
+              disabled={!onPayFullMonthlyDues || totalMonthlyDuesForStudent <= 0}
             >
               <DollarSign className="mr-2 h-4 w-4" /> Pay Full Monthly Dues (₹{totalMonthlyDuesForStudent.toLocaleString()})
             </Button>
-            
+
             <div className="mt-3 flex space-x-2 items-end border-t pt-4">
               <div className="flex flex-col space-y-1">
-                <Label htmlFor={`partial-${student.id}`} className="text-xs">Partial Payment (for {oldestUnpaidMonthForStudent || 'oldest due'})</Label>
+                <Label htmlFor={`partial-${student.id}`} className="text-xs">Partial Payment (for {oldestDueMonthForPartial || 'oldest due'})</Label>
                 <Input
                   id={`partial-${student.id}`}
                   type="number"
@@ -106,22 +160,22 @@ function StudentFeeItem({
               <Button
                 onClick={() => {
                   const amount = parseFloat(partialAmount);
-                  if (amount > 0 && oldestUnpaidMonthForStudent && onPayPartialMonthlyDues) {
-                     if (amount < totalMonthlyDuesForStudent) { // Assuming partial payment should be less than total due
-                        onPayPartialMonthlyDues(student.id, course, amount, oldestUnpaidMonthForStudent);
+                  if (amount > 0 && oldestDueMonthForPartial && onPayPartialMonthlyDues) {
+                     if (amount <= totalMonthlyDuesForStudent) {
+                        onPayPartialMonthlyDues(student.id, course, amount, oldestDueMonthForPartial);
                         setPartialAmount('');
                      } else {
-                        toast({ title: "Info", description: "Partial amount should be less than total due. Use 'Pay Full Monthly Dues' for full settlement.", variant: "default"});
+                        toast({ title: "Info", description: "Partial amount cannot be greater than total due.", variant: "default"});
                      }
                   } else if (amount <= 0) {
                      toast({ title: "Error", description: "Partial payment amount must be positive.", variant: "destructive"});
-                  } else if (!oldestUnpaidMonthForStudent) {
-                     toast({ title: "Info", description: "No specific oldest due month identified for partial payment.", variant: "default"});
+                  } else if (!oldestDueMonthForPartial) {
+                     toast({ title: "Info", description: "No specific oldest due month identified for partial payment, or all dues cleared.", variant: "default"});
                   }
                 }}
                 variant="outline"
                 size="sm"
-                disabled={!onPayPartialMonthlyDues || parseFloat(partialAmount) <= 0 || !oldestUnpaidMonthForStudent}
+                disabled={!onPayPartialMonthlyDues || parseFloat(partialAmount) <= 0 || !oldestDueMonthForPartial}
                 className="animate-button-click"
               >
                 Pay Partial
@@ -141,12 +195,13 @@ function StudentFeeItem({
 
 
 export default function BillingPage() {
-  const { students, courses, addPayment, isLoading } = useAppContext(); 
-  const { toast } = useToast(); 
+  const { students, courses, addPayment, isLoading } = useAppContext();
+  const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('due');
-  
+
   const handlePayEnrollment = async (studentId: string, course: Course) => {
+    const studentName = students.find(s=>s.id === studentId)?.name || 'Student';
     try {
       await addPayment(studentId, {
         date: new Date().toISOString(),
@@ -154,112 +209,126 @@ export default function BillingPage() {
         type: 'enrollment',
         remarks: `Enrollment fee for ${course.name}`
       });
-      toast({ title: "Success", description: `${students.find(s=>s.id === studentId)?.name}'s enrollment fee paid. Status set to active.` });
+      toast({ title: "Success", description: `${studentName}'s enrollment fee paid. Status set to active.` });
     } catch (error: any) {
-      toast({ title: "Error", description: `Failed to process enrollment payment: ${error.message}`, variant: "destructive" });
+      toast({ title: "Error", description: `Failed to process enrollment payment for ${studentName}: ${error.message}`, variant: "destructive" });
     }
   };
 
-  const handlePayFullMonthlyDues = async (studentId: string, course: Course, totalDue: number) => {
-    if (totalDue <= 0) return;
+  const handlePayFullMonthlyDues = async (
+    studentId: string,
+    course: Course,
+    billableMonthsToPay: BillableMonthDetail[]
+  ) => {
+    const studentName = students.find(s => s.id === studentId)?.name || 'Student';
+    let paymentsMadeCount = 0;
+    let totalAmountPaidThisAction = 0;
+
+    if (billableMonthsToPay.length === 0) {
+        toast({ title: "Info", description: `No outstanding dues to pay for ${studentName}.`, variant: "default" });
+        return;
+    }
+
     try {
-      await addPayment(studentId, {
-        date: new Date().toISOString(),
-        amount: totalDue, 
-        type: 'monthly', // Or a new type like 'monthly_settlement'
-        monthFor: format(new Date(), "MMMM yyyy"), // Indicates payment made in this month for past dues
-        remarks: `Settlement of outstanding monthly dues for ${course.name} up to ${format(new Date(), "MMMM yyyy")}`
-      });
-      toast({ title: "Success", description: `Full monthly dues of ₹${totalDue.toLocaleString()} paid for ${students.find(s=>s.id === studentId)?.name}.` });
+      for (const month of billableMonthsToPay) {
+        if (month.remainingDue > 0) {
+          await addPayment(studentId, {
+            date: new Date().toISOString(),
+            amount: month.remainingDue,
+            type: 'monthly',
+            monthFor: month.monthYear,
+            remarks: `Payment for ${month.monthYear} for ${course.name} (part of full dues settlement)`
+          });
+          paymentsMadeCount++;
+          totalAmountPaidThisAction += month.remainingDue;
+        }
+      }
+      if (paymentsMadeCount > 0) {
+        toast({ title: "Success", description: `Paid ₹${totalAmountPaidThisAction.toLocaleString()} for ${paymentsMadeCount} month(s) for ${studentName}. Dues settled.` });
+      } else {
+        // This case should ideally be caught by the initial billableMonthsToPay.length === 0 check
+        toast({ title: "Info", description: `No outstanding dues were found to pay for ${studentName}.`, variant: "default" });
+      }
     } catch (error: any) {
-       toast({ title: "Error", description: `Failed to process full monthly dues payment: ${error.message}`, variant: "destructive" });
+       toast({ title: "Error", description: `Failed to process full monthly dues payment for ${studentName}: ${error.message}`, variant: "destructive" });
     }
   };
-  
+
   const handlePayPartialMonthlyDues = async (studentId: string, course: Course, amount: number, oldestDueMonth: string) => {
+    const studentName = students.find(s=>s.id === studentId)?.name || 'Student';
     try {
       await addPayment(studentId, {
         date: new Date().toISOString(),
         amount: amount,
         type: 'partial',
-        monthFor: oldestDueMonth, 
+        monthFor: oldestDueMonth, // This indicates which month the partial payment is primarily for
         remarks: `Partial payment for ${oldestDueMonth} for ${course.name}`
       });
-      toast({ title: "Success", description: `Partial payment of ₹${amount.toLocaleString()} recorded for ${students.find(s=>s.id === studentId)?.name} for ${oldestDueMonth}.` });
+      toast({ title: "Success", description: `Partial payment of ₹${amount.toLocaleString()} recorded for ${studentName} for ${oldestDueMonth}.` });
     } catch (error: any) {
-      toast({ title: "Error", description: `Failed to process partial payment: ${error.message}`, variant: "destructive" });
+      toast({ title: "Error", description: `Failed to process partial payment for ${studentName}: ${error.message}`, variant: "destructive" });
     }
   };
 
-  const calculateStudentDues = useCallback((student: Student, course: Course | undefined) => {
-    let totalMonthlyDue = 0;
-    let oldestUnpaidMonth = "";
-
+  // This function is now primarily for filtering students into lists.
+  // The detailed due calculation happens within StudentFeeItem.
+  const calculateStudentTotalMonthlyDue = useCallback((student: Student, course: Course | undefined): number => {
     if (!course || student.status !== 'active') {
-      return { totalMonthlyDue, oldestUnpaidMonth };
+      return 0;
     }
 
+    let totalDue = 0;
     const currentDate = startOfMonth(new Date());
     const enrollmentDate = startOfMonth(new Date(student.enrollmentDate));
     let currentBillableMonthDate = addMonths(enrollmentDate, 1);
-    const billableMonthsDetails: {monthYear: string, remainingDue: number}[] = [];
-
 
     while (isBefore(currentBillableMonthDate, currentDate) || isEqual(currentBillableMonthDate, currentDate)) {
       const monthStr = format(currentBillableMonthDate, "MMMM yyyy");
-      const paymentsForThisMonth = student.paymentHistory.filter(p => 
+      const paymentsForThisMonth = student.paymentHistory.filter(p =>
         (p.type === 'monthly' || p.type === 'partial') && p.monthFor === monthStr
       );
       const amountPaidForThisMonth = paymentsForThisMonth.reduce((sum, p) => sum + p.amount, 0);
       const remainingDueForThisMonth = Math.max(0, course.monthlyFee - amountPaidForThisMonth);
-
-      if (remainingDueForThisMonth > 0) {
-        totalMonthlyDue += remainingDueForThisMonth;
-        billableMonthsDetails.push({monthYear: monthStr, remainingDue: remainingDueForThisMonth });
-      }
+      totalDue += remainingDueForThisMonth;
       currentBillableMonthDate = addMonths(currentBillableMonthDate, 1);
     }
-    
-    billableMonthsDetails.sort((a,b) => parse(a.monthYear, "MMMM yyyy", new Date()).getTime() - parse(b.monthYear, "MMMM yyyy", new Date()).getTime());
-    if(billableMonthsDetails.length > 0){
-        oldestUnpaidMonth = billableMonthsDetails[0].monthYear;
-    }
-
-    return { totalMonthlyDue, oldestUnpaidMonth };
+    return totalDue;
   }, []);
 
 
-  const filteredStudents = students.filter(student => 
+  const filteredStudents = students.filter(student =>
     student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (student.fatherName && student.fatherName.toLowerCase().includes(searchTerm.toLowerCase())) ||
     (student.mobile && student.mobile.includes(searchTerm))
   );
 
   const enrollmentPendingStudents = filteredStudents.filter(s => s.status === 'enrollment_pending');
-  
+
   const dueFeeStudentsDetails = filteredStudents
+    .filter(s => s.status === 'active')
     .map(s => {
         const course = courses.find(c => c.id === s.courseId);
-        const { totalMonthlyDue, oldestUnpaidMonth } = calculateStudentDues(s, course);
-        return { student: s, course, totalMonthlyDue, oldestUnpaidMonth, hasDues: totalMonthlyDue > 0 };
+        const totalMonthlyDue = calculateStudentTotalMonthlyDue(s, course);
+        return { student: s, course, totalMonthlyDue, hasDues: totalMonthlyDue > 0 };
     })
-    .filter(details => details.student.status === 'active' && details.hasDues);
+    .filter(details => details.hasDues);
 
   const noDueStudentsDetails = filteredStudents
+    .filter(s => s.status === 'active')
     .map(s => {
         const course = courses.find(c => c.id === s.courseId);
-        const { totalMonthlyDue } = calculateStudentDues(s, course);
+        const totalMonthlyDue = calculateStudentTotalMonthlyDue(s, course);
         return { student: s, course, totalMonthlyDue, hasNoDues: totalMonthlyDue <= 0 };
     })
-    .filter(details => details.student.status === 'active' && details.hasNoDues && !enrollmentPendingStudents.some(es => es.id === details.student.id));
+    .filter(details => details.hasNoDues && !enrollmentPendingStudents.some(es => es.id === details.student.id));
 
 
   if (isLoading) {
     return <div className="text-center py-10">Loading billing data...</div>;
   }
-  
+
   const renderStudentList = (
-      list: Array<{student: Student, course?: Course, totalMonthlyDue?: number, oldestUnpaidMonth?: string}>, 
+      list: Array<{student: Student, course?: Course, totalMonthlyDue?: number }>,
       type: 'enrollment' | 'due' | 'paid'
     ) => {
     if (list.length === 0) {
@@ -287,8 +356,7 @@ export default function BillingPage() {
             onPayFullMonthlyDues={type === 'due' ? handlePayFullMonthlyDues : undefined}
             onPayPartialMonthlyDues={type === 'due' ? handlePayPartialMonthlyDues : undefined}
             type={type}
-            totalMonthlyDuesForStudent={item.totalMonthlyDue || 0}
-            oldestUnpaidMonthForStudent={item.oldestUnpaidMonth || ""}
+            // totalMonthlyDuesForStudent and oldestUnpaidMonthForStudent are now internal to StudentFeeItem
           />
         ))}
       </ScrollArea>
@@ -298,11 +366,11 @@ export default function BillingPage() {
   return (
     <>
       <PageHeader title="Billing Management" description="Track student fees, payments, and dues." />
-      
+
       <div className="mb-6 flex space-x-4">
         <div className="relative flex-grow">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-            <Input 
+            <Input
                 placeholder="Search students by name, father's name, mobile..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -328,12 +396,14 @@ export default function BillingPage() {
           {renderStudentList(enrollmentPendingStudents.map(s => ({ student: s, course: courses.find(c => c.id === s.courseId) })), 'enrollment')}
         </TabsContent>
         <TabsContent value="due">
-          {renderStudentList(dueFeeStudentsDetails, 'due')}
+          {renderStudentList(dueFeeStudentsDetails.map(item => ({student: item.student, course: item.course, totalMonthlyDue: item.totalMonthlyDue})), 'due')}
         </TabsContent>
         <TabsContent value="paid">
-          {renderStudentList(noDueStudentsDetails, 'paid')}
+          {renderStudentList(noDueStudentsDetails.map(item => ({student: item.student, course: item.course, totalMonthlyDue: item.totalMonthlyDue})), 'paid')}
         </TabsContent>
       </Tabs>
     </>
   );
 }
+
+    
