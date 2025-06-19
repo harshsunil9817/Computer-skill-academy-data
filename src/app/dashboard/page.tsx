@@ -1,7 +1,7 @@
 
 "use client";
 import { useEffect, useState } from 'react';
-import { Users, DollarSign, UserPlus, TrendingUp } from 'lucide-react';
+import { Users, DollarSign, UserPlus, TrendingUp, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
 import { useAppContext } from '@/lib/context/AppContext';
@@ -13,9 +13,10 @@ interface StatCardProps {
   icon: React.ElementType;
   description?: string;
   className?: string;
+  isCalculating?: boolean;
 }
 
-function StatCard({ title, value, icon: Icon, description, className }: StatCardProps) {
+function StatCard({ title, value, icon: Icon, description, className, isCalculating }: StatCardProps) {
   return (
     <Card className={className}>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -23,26 +24,47 @@ function StatCard({ title, value, icon: Icon, description, className }: StatCard
         <Icon className="h-5 w-5 text-muted-foreground" />
       </CardHeader>
       <CardContent>
-        <div className="text-2xl font-bold">{value}</div>
-        {description && <p className="text-xs text-muted-foreground">{description}</p>}
+        {isCalculating ? (
+          <div className="flex items-center">
+            <Loader2 className="mr-2 h-5 w-5 animate-spin text-primary" />
+            <span className="text-sm text-muted-foreground">Calculating...</span>
+          </div>
+        ) : (
+          <div className="text-2xl font-bold">{value}</div>
+        )}
+        {description && !isCalculating && <p className="text-xs text-muted-foreground">{description}</p>}
       </CardContent>
     </Card>
   );
 }
 
+const initialDashboardStats = {
+  activeStudents: 0,
+  feesDueThisMonth: 0,
+  totalRevenue: 0,
+  newRegistrationsThisMonth: 0,
+};
 
 export default function DashboardPage() {
-  const { students, courses, isLoading } = useAppContext();
-  const [dashboardStats, setDashboardStats] = useState({
-    activeStudents: 0,
-    feesDueThisMonth: 0,
-    totalRevenue: 0,
-    newRegistrationsThisMonth: 0,
-  });
+  const { students, courses, isLoading: isAppContextLoading } = useAppContext();
+  const [dashboardStats, setDashboardStats] = useState(initialDashboardStats);
+  const [isCalculatingStats, setIsCalculatingStats] = useState(true);
 
   useEffect(() => {
-    if (!isLoading && students.length > 0 && courses.length > 0) {
+    // Start loading animation for stats immediately if app context is already done loading.
+    // Otherwise, wait for app context to finish.
+    if (!isAppContextLoading) {
+      setIsCalculatingStats(true);
+    } else {
+      // If app context is still loading, ensure we show calculating when it's done.
+      setIsCalculatingStats(true);
+      return; // Wait for app context to load data
+    }
+
+    // Proceed with calculations only if base data is available
+    if (students.length > 0 && courses.length > 0) {
       const startTime = performance.now();
+      console.log("Dashboard: Starting stats recalculation...");
 
       const courseMap = new Map<string, Course>();
       courses.forEach(course => {
@@ -88,7 +110,6 @@ export default function DashboardPage() {
             feesDueThisMonthAgg += course.monthlyFee;
           }
         } else if (student.status === 'enrollment_pending') {
-          // Enrollment fee is considered due if status is enrollment_pending
           feesDueThisMonthAgg += course.enrollmentFee;
         }
 
@@ -105,19 +126,20 @@ export default function DashboardPage() {
       });
       const endTime = performance.now();
       console.log(`Dashboard: Stats recalculated in ${endTime - startTime}ms`);
-    } else if (!isLoading && (students.length === 0 || courses.length === 0)) {
-      // Reset stats if loading is done but no data
-      setDashboardStats({
-        activeStudents: 0,
-        feesDueThisMonth: 0,
-        totalRevenue: 0,
-        newRegistrationsThisMonth: 0,
-      });
-      console.log("Dashboard: No students or courses, stats reset.");
+    } else if (!isAppContextLoading) { 
+      // App context is loaded, but no students/courses
+      setDashboardStats(initialDashboardStats);
+      console.log("Dashboard: No students or courses after app context load, stats reset.");
     }
-  }, [students, courses, isLoading]);
+    
+    // Always set calculating to false after attempting calculation or if no data
+    if (!isAppContextLoading) {
+        setIsCalculatingStats(false);
+    }
 
-  if (isLoading) {
+  }, [students, courses, isAppContextLoading]);
+
+  if (isAppContextLoading) {
     return <div className="text-center py-10">Loading dashboard data...</div>;
   }
 
@@ -131,6 +153,7 @@ export default function DashboardPage() {
           icon={Users}
           description="Total students currently enrolled."
           className="shadow-lg hover:shadow-xl transition-shadow duration-300"
+          isCalculating={isCalculatingStats}
         />
         <StatCard
           title="Fees Due This Month"
@@ -138,6 +161,7 @@ export default function DashboardPage() {
           icon={DollarSign}
           description="Expected income for the current month."
           className="shadow-lg hover:shadow-xl transition-shadow duration-300"
+          isCalculating={isCalculatingStats}
         />
         <StatCard
           title="Total Revenue"
@@ -145,6 +169,7 @@ export default function DashboardPage() {
           icon={TrendingUp}
           description="Sum of all payments received."
           className="shadow-lg hover:shadow-xl transition-shadow duration-300"
+          isCalculating={isCalculatingStats}
         />
         <StatCard
           title="New Registrations"
@@ -152,6 +177,7 @@ export default function DashboardPage() {
           icon={UserPlus}
           description="Students enrolled this month."
           className="shadow-lg hover:shadow-xl transition-shadow duration-300"
+          isCalculating={isCalculatingStats}
         />
       </div>
       <div className="mt-8">
@@ -160,8 +186,16 @@ export default function DashboardPage() {
             <CardTitle>Recent Activity</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-muted-foreground">Detailed activity logs and charts will be displayed here.</p>
-            {students.slice(-3).map(s => <div key={s.id} className="py-1">{s.name} joined on {new Date(s.enrollmentDate).toLocaleDateString()}</div>)}
+            {isCalculatingStats ? (
+                 <div className="flex items-center text-muted-foreground">
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <span>Loading recent activity...</span>
+                 </div>
+            ) : students.length > 0 ? (
+              students.slice(-3).map(s => <div key={s.id} className="py-1">{s.name} joined on {new Date(s.enrollmentDate).toLocaleDateString()}</div>)
+            ) : (
+              <p className="text-muted-foreground">No recent student activity to display.</p>
+            )}
           </CardContent>
         </Card>
       </div>
