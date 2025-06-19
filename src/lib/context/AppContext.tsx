@@ -3,7 +3,7 @@
 import type { ReactNode } from 'react';
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { Course, Student, PaymentRecord, StudentFormData, CourseFormData } from '@/lib/types';
-import { db } from '@/lib/firebase'; // Import Firestore instance
+import { db, app as firebaseAppInstance } from '@/lib/firebase'; // Import Firestore instance and app
 import { 
   collection, 
   getDocs, 
@@ -43,22 +43,43 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [students, setStudents] = useState<Student[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  const coursesCollectionRef = collection(db, 'courses');
-  const studentsCollectionRef = collection(db, 'students');
-
   useEffect(() => {
+    console.log("AppContext: useEffect triggered for data fetching.");
+
+    if (!process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) {
+        console.warn("AppContext: NEXT_PUBLIC_FIREBASE_PROJECT_ID is not set. Firebase features might not work.");
+    }
+    
+    if (!db) {
+      console.error("AppContext: Firestore 'db' instance is not available. Halting data fetch.");
+      setIsLoading(false); // Stop loading if db is not initialized
+      return;
+    }
+    console.log("AppContext: Firestore 'db' instance seems available.");
+
+    const coursesCollectionRef = collection(db, 'courses');
+    const studentsCollectionRef = collection(db, 'students');
+
     const fetchData = async () => {
+      console.log("AppContext: fetchData started.");
       setIsLoading(true);
       try {
+        console.log("AppContext: Attempting to fetch courses...");
         const courseSnapshot = await getDocs(coursesCollectionRef);
+        console.log(`AppContext: Fetched ${courseSnapshot.docs.length} courses.`);
         setCourses(courseSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Course)));
         
+        console.log("AppContext: Attempting to fetch students...");
         const studentSnapshot = await getDocs(studentsCollectionRef);
+        console.log(`AppContext: Fetched ${studentSnapshot.docs.length} students.`);
         setStudents(studentSnapshot.docs.map(doc => mapDocToStudent({ ...doc.data(), id: doc.id })));
+        console.log("AppContext: Data fetching successful.");
 
       } catch (error) {
-        console.error("Failed to load data from Firestore", error);
+        console.error("AppContext: Failed to load data from Firestore", error);
+        // Optionally, set some error state here to display to the user
       } finally {
+        console.log("AppContext: fetchData finished, setting isLoading to false.");
         setIsLoading(false);
       }
     };
@@ -68,6 +89,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
 
   const addCourse = async (courseData: CourseFormData) => {
+    if (!db) { console.error("Firestore 'db' not available for addCourse"); return; }
+    const coursesCollectionRef = collection(db, 'courses');
     try {
       const docRef = await addDoc(coursesCollectionRef, courseData);
       setCourses((prev) => [...prev, { ...courseData, id: docRef.id }]);
@@ -77,6 +100,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const updateCourse = async (updatedCourse: Course) => {
+    if (!db) { console.error("Firestore 'db' not available for updateCourse"); return; }
     const courseDoc = doc(db, 'courses', updatedCourse.id);
     const { id, ...courseDataToUpdate } = updatedCourse; 
     try {
@@ -88,6 +112,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const deleteCourse = async (courseId: string) => {
+    if (!db) { console.error("Firestore 'db' not available for deleteCourse"); return; }
     const courseDoc = doc(db, 'courses', courseId);
     try {
       await deleteDoc(courseDoc);
@@ -98,6 +123,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const addStudent = async (studentData: StudentFormData) => {
+    if (!db) { console.error("Firestore 'db' not available for addStudent"); return; }
+    const studentsCollectionRef = collection(db, 'students');
     const newStudentPayload: Omit<Student, 'id'> = {
       ...studentData,
       enrollmentDate: studentData.enrollmentDate, 
@@ -117,6 +144,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   };
   
   const updateStudent = async (updatedStudent: Student) => {
+    if (!db) { console.error("Firestore 'db' not available for updateStudent"); return; }
     const studentDoc = doc(db, 'students', updatedStudent.id);
     const { id, ...studentDataToUpdate } = updatedStudent;
     try {
@@ -137,6 +165,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   };
   
   const addPayment = async (studentId: string, paymentData: Omit<PaymentRecord, 'id'>) => {
+    if (!db) { console.error("Firestore 'db' not available for addPayment"); return; }
     const studentRef = doc(db, 'students', studentId);
     try {
         const currentStudent = students.find(s => s.id === studentId);
@@ -147,7 +176,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
         const newPayment: PaymentRecord = { 
             ...paymentData, 
-            id: doc(collection(db, '_')).id, 
+            id: doc(collection(db, '_')).id, // Generate a client-side ID for the payment record
             date: paymentData.date, 
         };
         
@@ -206,4 +235,3 @@ export const useAppContext = () => {
   }
   return context;
 };
-

@@ -14,8 +14,41 @@ const firebaseConfig = {
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID
 };
 
+console.log("Firebase Config Check:", {
+  apiKeyExists: !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  authDomainExists: !!process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectIdExists: !!process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  // You can add more checks here if needed
+});
+
 // Initialize Firebase
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-const db = getFirestore(app);
+let app;
+if (!getApps().length) {
+  try {
+    app = initializeApp(firebaseConfig);
+    console.log("Firebase app initialized successfully.");
+  } catch (e) {
+    console.error("Firebase initialization error:", e);
+    console.error("Firebase config used:", firebaseConfig);
+    // If initialization fails, app will be undefined.
+    // db will then also likely fail or be misconfigured.
+  }
+} else {
+  app = getApp();
+  console.log("Firebase app already initialized.");
+}
+
+let db;
+if (app) {
+  try {
+    db = getFirestore(app);
+    console.log("Firestore instance initialized successfully.");
+  } catch (e) {
+    console.error("Error getting Firestore instance:", e);
+  }
+} else {
+  console.error("Firebase app is not initialized, cannot get Firestore instance.");
+}
+
 
 export { app, db };
