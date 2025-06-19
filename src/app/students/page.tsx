@@ -2,7 +2,7 @@
 "use client";
 import React, { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
-import { PlusCircle, User, Users, MoreVertical, CreditCard, History, DollarSign, CalendarCheck2, CheckCircle, Trash2, UserMinus, ImageUp, Camera, XCircle } from 'lucide-react';
+import { PlusCircle, User, Users, MoreVertical, Trash2, UserMinus, ImageUp, Camera, XCircle, Edit } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { 
   Dialog, 
@@ -29,20 +29,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
 import { useAppContext } from '@/lib/context/AppContext';
-import type { Student, StudentFormData, Course, PaymentRecord } from '@/lib/types';
+import type { Student, StudentFormData, Course } from '@/lib/types';
 import { DateOfBirthPicker } from '@/components/students/DateOfBirthPicker';
 import { EnrollmentDateDropdownPicker } from '@/components/students/EnrollmentDateDropdownPicker';
 import { DOB_DAYS, DOB_MONTHS, DOB_YEARS, COURSE_DURATION_UNITS, MOBILE_REGEX, AADHAR_REGEX } from '@/lib/constants';
 import { useToast } from '@/hooks/use-toast';
-import { format, addMonths, isBefore, isEqual, startOfMonth } from 'date-fns';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import Link from 'next/link';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Textarea } from '@/components/ui/textarea';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Alert, AlertDescription as UIDescription } from "@/components/ui/alert"; // Renamed to UIDescription to avoid conflict
+import { Alert, AlertDescription as UIDescription } from "@/components/ui/alert"; 
 import { cn } from '@/lib/utils';
 
 
@@ -65,43 +61,14 @@ const initialStudentFormState: StudentFormData = {
   photoDataUri: null,
 };
 
-type PaymentType = 'enrollment' | 'monthly' | 'partial';
-
-interface BillableMonthForDialog {
-  monthYear: string; 
-  dueDate: Date;
-  amountPaidThisMonth: number;
-  amountDueThisMonth: number; 
-  isFullyPaid: boolean;
-  remainingDue: number;
-}
-
-const initialPaymentFormState = {
-  type: 'monthly' as PaymentType,
-  amount: 0,
-  monthFor: format(new Date(), "MMMM yyyy"),
-  remarks: '',
-};
-
 export default function StudentsPage() {
-  const { students, courses, addStudent, isLoading, addPayment, updateStudent, deleteStudent } = useAppContext();
-  const [isAddStudentDialogOpen, setIsAddStudentDialogOpen] = useState(false);
+  const { students, courses, addStudent, isLoading, updateStudent, deleteStudent } = useAppContext();
+  const [isStudentFormDialogOpen, setIsStudentFormDialogOpen] = useState(false);
   const [studentForm, setStudentForm] = useState<StudentFormData>(initialStudentFormState);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [selectedCourseDetails, setSelectedCourseDetails] = useState<{enrollmentFee: number, monthlyFee: number} | null>(null);
   const { toast } = useToast();
-
-  const [viewingStudentHistory, setViewingStudentHistory] = useState<Student | null>(null);
-  const [isRecordPaymentDialogOpen, setIsRecordPaymentDialogOpen] = useState(false);
-  const [recordingPaymentForStudent, setRecordingPaymentForStudent] = useState<Student | null>(null);
-  const [paymentForm, setPaymentForm] = useState(initialPaymentFormState);
   
-  const [billableMonthsForDialog, setBillableMonthsForDialog] = useState<BillableMonthForDialog[]>([]);
-  const [selectedMonthsToPayInDialog, setSelectedMonthsToPayInDialog] = useState<Record<string, boolean>>({});
-
-  const studentCourseForPayment = recordingPaymentForStudent ? courses.find(c => c.id === recordingPaymentForStudent.courseId) : null;
-
-  // Photo state for Add Student Dialog
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
@@ -124,60 +91,6 @@ export default function StudentsPage() {
   }, [studentForm.courseId, courses]);
 
   useEffect(() => {
-    if (recordingPaymentForStudent && studentCourseForPayment) {
-      if (recordingPaymentForStudent.status === 'enrollment_pending') {
-        setPaymentForm({
-          type: 'enrollment',
-          amount: studentCourseForPayment.enrollmentFee,
-          monthFor: '', 
-          remarks: `Enrollment fee for ${studentCourseForPayment.name}`,
-        });
-        setBillableMonthsForDialog([]);
-        setSelectedMonthsToPayInDialog({});
-      } else { 
-         setPaymentForm({ 
-          type: 'monthly', 
-          amount: 0, 
-          monthFor: format(new Date(), "MMMM yyyy"), 
-          remarks: `Monthly fee for ${studentCourseForPayment.name}`,
-        });
-        
-        const months: BillableMonthForDialog[] = [];
-        const currentDate = startOfMonth(new Date());
-        const enrollmentDate = startOfMonth(new Date(recordingPaymentForStudent.enrollmentDate));
-        let currentBillableMonthDate = addMonths(enrollmentDate, 1); 
-
-        while (isBefore(currentBillableMonthDate, currentDate) || isEqual(currentBillableMonthDate, currentDate)) {
-          const monthStr = format(currentBillableMonthDate, "MMMM yyyy");
-          const paymentsForThisMonth = recordingPaymentForStudent.paymentHistory.filter(p => 
-            (p.type === 'monthly' || p.type === 'partial') && p.monthFor === monthStr
-          );
-          const amountPaidForThisMonth = paymentsForThisMonth.reduce((sum, p) => sum + p.amount, 0);
-          const remainingDueForThisMonth = Math.max(0, studentCourseForPayment.monthlyFee - amountPaidForThisMonth);
-          
-          months.push({
-            monthYear: monthStr,
-            dueDate: new Date(currentBillableMonthDate),
-            amountPaidThisMonth: amountPaidForThisMonth,
-            amountDueThisMonth: studentCourseForPayment.monthlyFee,
-            isFullyPaid: remainingDueForThisMonth <= 0,
-            remainingDue: remainingDueForThisMonth,
-          });
-          currentBillableMonthDate = addMonths(currentBillableMonthDate, 1);
-        }
-        months.sort((a,b) => a.dueDate.getTime() - b.dueDate.getTime());
-        setBillableMonthsForDialog(months);
-        setSelectedMonthsToPayInDialog({});
-      }
-    } else {
-      setPaymentForm(initialPaymentFormState);
-      setBillableMonthsForDialog([]);
-      setSelectedMonthsToPayInDialog({});
-    }
-  }, [recordingPaymentForStudent, studentCourseForPayment]);
-
-  // Camera Effect
-  useEffect(() => {
     if (isCameraOpen) {
       const getCameraPermission = async () => {
         try {
@@ -194,18 +107,17 @@ export default function StudentsPage() {
             title: 'Camera Access Denied',
             description: 'Please enable camera permissions in your browser settings.',
           });
-          setIsCameraOpen(false); // Close camera if permission denied
+          setIsCameraOpen(false); 
         }
       };
       getCameraPermission();
     } else {
-      // Cleanup: Stop video stream when camera is closed
       if (videoRef.current && videoRef.current.srcObject) {
         const stream = videoRef.current.srcObject as MediaStream;
         stream.getTracks().forEach(track => track.stop());
         videoRef.current.srcObject = null;
       }
-      setHasCameraPermission(null); // Reset permission status
+      setHasCameraPermission(null); 
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isCameraOpen]);
@@ -252,7 +164,7 @@ export default function StudentsPage() {
         setStudentForm(prev => ({ ...prev, photoDataUri: dataUri, photoFile: null }));
         setPhotoPreview(dataUri);
       }
-      handleCloseCamera(); // Close camera after capture
+      handleCloseCamera(); 
     }
   };
 
@@ -260,12 +172,12 @@ export default function StudentsPage() {
     setStudentForm(prev => ({ ...prev, photoFile: null, photoDataUri: null }));
     setPhotoPreview(null);
     if (fileInputRef.current) {
-      fileInputRef.current.value = ""; // Reset file input
+      fileInputRef.current.value = ""; 
     }
   };
 
 
-  const handleAddStudentSubmit = async (e: React.FormEvent) => {
+  const handleStudentFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!MOBILE_REGEX.test(studentForm.mobile)) {
       toast({ title: "Error", description: "Mobile number must be 10 digits.", variant: "destructive" });
@@ -280,10 +192,40 @@ export default function StudentsPage() {
       return;
     }
 
+    const { enrollmentDate: enrollmentDateObj, dob: dobObj, ...restOfForm } = studentForm;
+    const isoEnrollmentDate = `${enrollmentDateObj.year}-${enrollmentDateObj.month}-${enrollmentDateObj.day}`;
+    const dobForPayload = `${dobObj.year}-${dobObj.month}-${dobObj.day}`;
+
+
     try {
-      await addStudent(studentForm); 
-      toast({ title: "Success", description: "Student added successfully. Enrollment fee pending." });
-      setIsAddStudentDialogOpen(false);
+      if (editingStudent) {
+        const photoToBeRemoved = photoPreview === null && !!editingStudent.photoUrl && !studentForm.photoFile && !studentForm.photoDataUri;
+        
+        // Construct payload for updateStudent, it expects dates as string or Date, not objects.
+        // And other fields as they are defined in Student interface or relevant for update.
+        const updatePayload: Partial<Omit<Student, 'id' | 'paymentHistory'>> & { enrollmentDate?: string; dob?: any; photoFile?: File | null; photoDataUri?: string | null; photoToBeRemoved?: boolean } = {
+          ...restOfForm, // Includes name, fatherName, mobile, aadhar, courseId, courseDurationValue, courseDurationUnit
+          enrollmentDate: isoEnrollmentDate,
+          dob: { // Keep DOB as an object for update if that's how AppContext handles it, or convert
+              day: studentForm.dob.day,
+              month: studentForm.dob.month,
+              year: studentForm.dob.year,
+          },
+          photoFile: studentForm.photoFile,
+          photoDataUri: studentForm.photoDataUri,
+          photoToBeRemoved,
+        };
+        
+        await updateStudent(editingStudent.id, updatePayload);
+        toast({ title: "Success", description: "Student details updated successfully." });
+
+      } else {
+        // For adding a new student, StudentFormData is directly compatible with addStudent context function
+        await addStudent(studentForm); 
+        toast({ title: "Success", description: "Student added successfully. Enrollment fee pending." });
+      }
+
+      setIsStudentFormDialogOpen(false);
       const todayForForm = new Date();
       setStudentForm({
         ...initialStudentFormState,
@@ -294,7 +236,8 @@ export default function StudentsPage() {
         }
       });
       setSelectedCourseDetails(null);
-      handleRemovePhoto(); // Clear photo form state
+      handleRemovePhoto(); 
+      setEditingStudent(null);
     } catch (error: any) {
       console.error("Student operation failed:", error);
       toast({
@@ -317,114 +260,36 @@ export default function StudentsPage() {
         }
       });
     setSelectedCourseDetails(null);
-    handleRemovePhoto(); // Clear photo state when opening dialog
-    setIsCameraOpen(false); // Ensure camera is closed
-    setIsAddStudentDialogOpen(true);
-  };
-
-  const openPaymentHistoryDialog = (student: Student) => {
-    setViewingStudentHistory(student);
-  };
-
-  const openRecordPaymentDialog = (student: Student) => {
-    setRecordingPaymentForStudent(student);
-    setIsRecordPaymentDialogOpen(true);
+    handleRemovePhoto(); 
+    setIsCameraOpen(false); 
+    setIsStudentFormDialogOpen(true);
   };
   
-  const handlePaymentFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    let newAmount = paymentForm.amount;
+  const openEditStudentDialog = (student: Student) => {
+    setEditingStudent(student);
+    
+    const enrollmentDateParts = student.enrollmentDate.split('T')[0].split('-');
+    const dobParts = student.dob ? [String(student.dob.year), String(student.dob.month).padStart(2,'0'), String(student.dob.day).padStart(2,'0')] : null;
 
-    if (name === 'type') {
-        const newType = value as PaymentType;
-        if (newType === 'enrollment' && studentCourseForPayment && recordingPaymentForStudent?.status === 'enrollment_pending') {
-            newAmount = studentCourseForPayment.enrollmentFee;
-        } else if (newType === 'monthly' && studentCourseForPayment) {
-             newAmount = 0; 
-        } else if (newType === 'partial' && studentCourseForPayment) {
-            newAmount = paymentForm.amount > 0 && paymentForm.type === 'partial' ? paymentForm.amount : 0; 
-        }
-         setPaymentForm(prev => ({ ...prev, type: newType, amount: newAmount, monthFor: newType === 'enrollment' ? '' : prev.monthFor || format(new Date(), "MMMM yyyy") }));
-    } else if (name === 'amount') {
-        setPaymentForm(prev => ({ ...prev, amount: parseFloat(value) || 0 }));
-    }
-     else { 
-        setPaymentForm(prev => ({ ...prev, [name]: value }));
-    }
+
+    setStudentForm({
+      name: student.name,
+      fatherName: student.fatherName,
+      dob: dobParts ? { day: dobParts[2], month: dobParts[1], year: dobParts[0] } : initialStudentFormState.dob,
+      mobile: student.mobile,
+      aadhar: student.aadhar,
+      enrollmentDate: { day: enrollmentDateParts[2], month: enrollmentDateParts[1], year: enrollmentDateParts[0] },
+      courseId: student.courseId,
+      courseDurationValue: student.courseDurationValue,
+      courseDurationUnit: student.courseDurationUnit,
+      photoFile: null, 
+      photoDataUri: null,
+    });
+    setPhotoPreview(student.photoUrl || null);
+    setIsCameraOpen(false);
+    setIsStudentFormDialogOpen(true);
   };
 
-  const handleMonthSelectionInDialog = (monthYear: string, checked: boolean) => {
-    setSelectedMonthsToPayInDialog(prev => ({ ...prev, [monthYear]: checked }));
-  };
-
-  const handleRecordPaymentSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!recordingPaymentForStudent || !studentCourseForPayment) {
-      toast({ title: "Error", description: "Student or course data missing.", variant: "destructive" });
-      return;
-    }
-
-    try {
-      if (paymentForm.type === 'monthly') {
-        const monthsToPayInDialog = billableMonthsForDialog.filter(
-          bm => selectedMonthsToPayInDialog[bm.monthYear] && !bm.isFullyPaid && bm.remainingDue > 0
-        );
-
-        if (monthsToPayInDialog.length === 0) {
-          toast({ title: "Info", description: "No months selected for payment or all selected months are already paid/have no dues.", variant: "default" });
-          return;
-        }
-        let paymentsRecordedCount = 0;
-        for (const monthPayment of monthsToPayInDialog) {
-          await addPayment(recordingPaymentForStudent.id, {
-            date: new Date().toISOString(),
-            amount: monthPayment.remainingDue, 
-            type: 'monthly', 
-            monthFor: monthPayment.monthYear, 
-            remarks: paymentForm.remarks || `Payment for ${monthPayment.monthYear} for ${studentCourseForPayment.name}`
-          });
-          paymentsRecordedCount++;
-        }
-        if (paymentsRecordedCount > 0) {
-            toast({ title: "Success", description: `Payments recorded for ${paymentsRecordedCount} selected month(s) for ${recordingPaymentForStudent.name}.` });
-        }
-
-      } else { 
-        if (paymentForm.amount <= 0) {
-          toast({ title: "Error", description: "Payment amount must be greater than zero.", variant: "destructive" });
-          return;
-        }
-        if (paymentForm.type === 'partial' && !paymentForm.monthFor.trim()) {
-          toast({ title: "Error", description: "Please specify 'Month For' (e.g., July 2024) for partial payments.", variant: "destructive" });
-          return;
-        }
-        if (paymentForm.type === 'partial' && !/^[A-Za-z]+ [0-9]{4}$/.test(paymentForm.monthFor.trim())) {
-            toast({ title: "Error", description: "Invalid 'Month For' format. Expected 'Month Year' (e.g., July 2024).", variant: "destructive" });
-            return;
-        }
-
-        const paymentDetails: Omit<PaymentRecord, 'id'> = {
-          date: new Date().toISOString(),
-          amount: paymentForm.amount,
-          type: paymentForm.type,
-          monthFor: paymentForm.type === 'partial' ? paymentForm.monthFor.trim() : (paymentForm.type === 'enrollment' ? undefined : paymentForm.monthFor.trim()),
-          remarks: paymentForm.remarks || `${paymentForm.type.charAt(0).toUpperCase() + paymentForm.type.slice(1)} fee for ${studentCourseForPayment.name}${paymentForm.monthFor && paymentForm.type === 'partial' ? ` for ${paymentForm.monthFor.trim()}` : ''}`,
-        };
-        await addPayment(recordingPaymentForStudent.id, paymentDetails);
-        toast({ title: "Success", description: `${paymentForm.type.charAt(0).toUpperCase() + paymentForm.type.slice(1)} payment of ₹${paymentForm.amount.toLocaleString()} recorded for ${recordingPaymentForStudent.name}.` });
-      }
-      
-      setIsRecordPaymentDialogOpen(false);
-      setRecordingPaymentForStudent(null); 
-      setPaymentForm(initialPaymentFormState);
-      setSelectedMonthsToPayInDialog({});
-
-    } catch (error: any) {
-      console.error("Failed to record payment:", error);
-      toast({ title: "Error", description: `Failed to record payment: ${error.message}`, variant: "destructive" });
-    }
-  };
-  
   const handleMarkAsLeft = async (studentId: string) => {
     try {
       await updateStudent(studentId, { status: 'left' });
@@ -436,7 +301,7 @@ export default function StudentsPage() {
 
   const handleDeleteStudent = async (studentId: string) => {
     try {
-      await deleteStudent(studentId); // This will also need to handle Appwrite photo deletion eventually
+      await deleteStudent(studentId); 
       toast({ title: "Success", description: "Student deleted successfully." });
     } catch (error: any) {
       toast({ title: "Error", description: `Failed to delete student: ${error.message}`, variant: "destructive" });
@@ -446,7 +311,7 @@ export default function StudentsPage() {
   const pageHeader = (
     <PageHeader
       title="Manage Students"
-      description="Add new students and view existing enrollments."
+      description="Add new students, edit details, and view existing enrollments."
       action={
         <Button onClick={openAddStudentDialog} className="animate-button-click" disabled={isLoading}>
           <PlusCircle className="mr-2 h-5 w-5" /> Add New Student
@@ -456,20 +321,22 @@ export default function StudentsPage() {
   );
   
   const renderStudentDialog = () => (
-    <Dialog open={isAddStudentDialogOpen} onOpenChange={(isOpen) => {
-        setIsAddStudentDialogOpen(isOpen);
+    <Dialog open={isStudentFormDialogOpen} onOpenChange={(isOpen) => {
+        setIsStudentFormDialogOpen(isOpen);
         if (!isOpen) {
-            handleCloseCamera(); // Ensure camera is off when dialog closes
+            handleCloseCamera(); 
+            setEditingStudent(null); // Reset editing state when dialog closes
+            handleRemovePhoto(); // Clear photo preview and form state
+            setStudentForm(initialStudentFormState); // Reset form
         }
     }}>
       <DialogContent className="sm:max-w-lg shadow-2xl rounded-lg">
         <DialogHeader>
-          <DialogTitle className="font-headline text-primary">{editingStudent ? 'Edit Student' : 'Add New Student'}</DialogTitle>
+          <DialogTitle className="font-headline text-primary">{editingStudent ? 'Edit Student Details' : 'Add New Student'}</DialogTitle>
         </DialogHeader>
         <ScrollArea className="max-h-[70vh]">
-        <form onSubmit={handleAddStudentSubmit} className="p-1 pr-4">
+        <form onSubmit={handleStudentFormSubmit} className="p-1 pr-4">
           <div className="grid gap-4 py-4">
-            {/* Student Info Fields */}
             <div className="space-y-1">
               <Label htmlFor="name">Student Name</Label>
               <Input id="name" name="name" value={studentForm.name} onChange={handleStudentFormInputChange} required />
@@ -491,7 +358,6 @@ export default function StudentsPage() {
               <Input id="aadhar" name="aadhar" type="text" value={studentForm.aadhar} onChange={handleStudentFormInputChange} maxLength={12} pattern="\d{12}" required />
             </div>
             
-            {/* Photo Section */}
             <div className="space-y-2 border p-4 rounded-md">
                 <Label className="text-base font-medium">Student Photo</Label>
                 {photoPreview && (
@@ -550,8 +416,6 @@ export default function StudentsPage() {
                 </Tabs>
             </div>
 
-
-            {/* Course and Enrollment Fields */}
             <div className="space-y-1">
               <Label htmlFor="enrollmentDate">Enrollment Date</Label>
               <EnrollmentDateDropdownPicker id="enrollmentDate" value={studentForm.enrollmentDate} onChange={handleEnrollmentDateObjChange} />
@@ -602,211 +466,6 @@ export default function StudentsPage() {
     </Dialog>
   );
 
-  const renderPaymentHistoryDialog = () => (
-    <Dialog open={!!viewingStudentHistory} onOpenChange={() => setViewingStudentHistory(null)}>
-      <DialogContent className="sm:max-w-lg shadow-2xl rounded-lg">
-        <DialogHeader>
-          <DialogTitle className="font-headline text-primary">Payment History: {viewingStudentHistory?.name}</DialogTitle>
-        </DialogHeader>
-        {viewingStudentHistory && viewingStudentHistory.paymentHistory.length > 0 ? (
-          <ScrollArea className="max-h-[60vh] mt-4">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Amount (₹)</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Month For</TableHead>
-                  <TableHead>Remarks</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {viewingStudentHistory.paymentHistory.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map(payment => (
-                  <TableRow key={payment.id}>
-                    <TableCell>{new Date(payment.date).toLocaleDateString()}</TableCell>
-                    <TableCell>{payment.amount.toLocaleString()}</TableCell>
-                    <TableCell className="capitalize">{payment.type}</TableCell>
-                    <TableCell>{payment.monthFor || 'N/A'}</TableCell>
-                    <TableCell>{payment.remarks}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </ScrollArea>
-        ) : (
-          <p className="py-8 text-center text-muted-foreground">No payment history found for this student.</p>
-        )}
-        <DialogFooter className="mt-6">
-          <DialogClose asChild>
-            <Button type="button" variant="outline" className="animate-button-click">Close</Button>
-          </DialogClose>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-
-  const renderRecordPaymentDialog = () => {
-    if (!recordingPaymentForStudent || !studentCourseForPayment) return null;
-
-    const currentlySelectedMonthsForPaymentInDialog = billableMonthsForDialog.filter(
-        bm => selectedMonthsToPayInDialog[bm.monthYear] && !bm.isFullyPaid
-    );
-    const totalAmountForSelectedMonthsInDialog = currentlySelectedMonthsForPaymentInDialog.reduce(
-        (sum, bm) => sum + bm.remainingDue, 0
-    );
-
-
-    return (
-        <Dialog open={isRecordPaymentDialogOpen} onOpenChange={() => { setIsRecordPaymentDialogOpen(false); setRecordingPaymentForStudent(null); }}>
-            <DialogContent className="sm:max-w-md shadow-2xl rounded-lg">
-                <DialogHeader>
-                    <DialogTitle className="font-headline text-primary">Record Payment for {recordingPaymentForStudent.name}</DialogTitle>
-                    <CardDescription>Course: {studentCourseForPayment.name}</CardDescription>
-                </DialogHeader>
-                <ScrollArea className="max-h-[60vh] pr-2">
-                <form onSubmit={handleRecordPaymentSubmit} className="space-y-4 py-4">
-                    <div>
-                        <Label htmlFor="paymentType">Payment Type</Label>
-                        <Select 
-                            name="type" 
-                            value={paymentForm.type} 
-                            onValueChange={(value) => handlePaymentFormChange({ target: { name: 'type', value } } as any)}
-                        >
-                            <SelectTrigger id="paymentType">
-                                <SelectValue placeholder="Select payment type" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {recordingPaymentForStudent.status === 'enrollment_pending' && (
-                                    <SelectItem value="enrollment">Enrollment Fee</SelectItem>
-                                )}
-                                {(recordingPaymentForStudent.status === 'active' || recordingPaymentForStudent.status === 'completed_unpaid') && (
-                                  <>
-                                    <SelectItem value="monthly">Monthly Fee (Select Months)</SelectItem>
-                                    <SelectItem value="partial">Partial Fee (Single Month)</SelectItem>
-                                  </>
-                                )}
-                            </SelectContent>
-                        </Select>
-                    </div>
-
-                    {paymentForm.type === 'enrollment' && (
-                        <div>
-                            <Label htmlFor="paymentAmountEnrollment">Amount (₹)</Label>
-                            <Input 
-                                id="paymentAmountEnrollment" 
-                                name="amount" 
-                                type="number" 
-                                value={paymentForm.amount} 
-                                onChange={handlePaymentFormChange}
-                                disabled 
-                                required 
-                            />
-                        </div>
-                    )}
-
-                    {paymentForm.type === 'partial' && (
-                        <>
-                            <div>
-                                <Label htmlFor="paymentAmountPartial">Amount (₹)</Label>
-                                <Input 
-                                    id="paymentAmountPartial" 
-                                    name="amount" 
-                                    type="number" 
-                                    value={paymentForm.amount} 
-                                    onChange={handlePaymentFormChange}
-                                    required 
-                                />
-                            </div>
-                            <div>
-                                <Label htmlFor="paymentMonthForPartial">Month For (e.g., July 2024)</Label>
-                                <Input 
-                                    id="paymentMonthForPartial" 
-                                    name="monthFor" 
-                                    type="text" 
-                                    value={paymentForm.monthFor} 
-                                    onChange={handlePaymentFormChange}
-                                    placeholder="MMMM YYYY" 
-                                    required
-                                />
-                            </div>
-                        </>
-                    )}
-                    
-                    {paymentForm.type === 'monthly' && billableMonthsForDialog.length > 0 && (
-                        <div className="space-y-2 border rounded-md p-3 bg-muted/30">
-                            <Label className="font-medium text-sm">Select Months to Pay:</Label>
-                             <ScrollArea className="h-48 pr-2">
-                                {billableMonthsForDialog.map((bm) => (
-                                <div key={bm.monthYear} className="flex items-center justify-between p-2 rounded-md bg-background shadow-sm mb-1">
-                                    <div className="flex items-center space-x-3">
-                                    <Checkbox
-                                        id={`dialog-${recordingPaymentForStudent.id}-${bm.monthYear}`}
-                                        checked={bm.isFullyPaid || !!selectedMonthsToPayInDialog[bm.monthYear]}
-                                        disabled={bm.isFullyPaid || bm.remainingDue <= 0}
-                                        onCheckedChange={(checked) => handleMonthSelectionInDialog(bm.monthYear, !!checked)}
-                                    />
-                                    <Label htmlFor={`dialog-${recordingPaymentForStudent.id}-${bm.monthYear}`} className={cn("text-xs", bm.isFullyPaid ? "text-green-600" : "text-foreground")}>
-                                        {bm.monthYear}
-                                    </Label>
-                                    </div>
-                                    <div className="text-xs">
-                                    {bm.isFullyPaid ? (
-                                        <span className="text-green-600 font-semibold flex items-center"><CheckCircle className="h-3 w-3 mr-1"/>Paid</span>
-                                    ) : (
-                                        <>
-                                        <span className={bm.remainingDue > 0 ? "text-destructive" : "text-muted-foreground"}>Due: ₹{bm.remainingDue.toLocaleString()}</span>
-                                        {bm.amountPaidThisMonth > 0 && (
-                                            <span className="text-xs text-muted-foreground ml-1">(Paid: ₹{bm.amountPaidThisMonth.toLocaleString()})</span>
-                                        )}
-                                        </>
-                                    )}
-                                    </div>
-                                </div>
-                                ))}
-                            </ScrollArea>
-                            {currentlySelectedMonthsForPaymentInDialog.length > 0 && (
-                                <div className="text-sm font-medium pt-2 border-t">
-                                    Total for Selected: ₹{totalAmountForSelectedMonthsInDialog.toLocaleString()}
-                                </div>
-                            )}
-                        </div>
-                    )}
-                     {paymentForm.type === 'monthly' && billableMonthsForDialog.length === 0 && (
-                        <p className="text-sm text-muted-foreground p-3 border rounded-md bg-muted/30">No past due monthly fees found for this student.</p>
-                    )}
-
-
-                    <div>
-                        <Label htmlFor="paymentRemarks">Remarks (Optional)</Label>
-                        <Textarea 
-                            id="paymentRemarks" 
-                            name="remarks" 
-                            value={paymentForm.remarks} 
-                            onChange={handlePaymentFormChange} 
-                            rows={3}
-                        />
-                    </div>
-                    <DialogFooter>
-                        <DialogClose asChild>
-                            <Button type="button" variant="outline">Cancel</Button>
-                        </DialogClose>
-                        <Button 
-                            type="submit"
-                            disabled={
-                                (paymentForm.type === 'enrollment' && paymentForm.amount <= 0) ||
-                                (paymentForm.type === 'partial' && paymentForm.amount <= 0) ||
-                                (paymentForm.type === 'monthly' && currentlySelectedMonthsForPaymentInDialog.length === 0 && billableMonthsForDialog.some(bm => !bm.isFullyPaid && bm.remainingDue > 0))
-                            }
-                        >
-                           {paymentForm.type === 'monthly' ? 'Record Selected Month(s)' : 'Record Payment'}
-                        </Button>
-                    </DialogFooter>
-                </form>
-                </ScrollArea>
-            </DialogContent>
-        </Dialog>
-    );
-  };
 
   if (isLoading) {
     return (
@@ -839,8 +498,6 @@ export default function StudentsPage() {
           </CardContent>
         </Card>
         {renderStudentDialog()}
-        {renderPaymentHistoryDialog()}
-        {renderRecordPaymentDialog()}
       </>
     );
   }
@@ -881,17 +538,15 @@ export default function StudentsPage() {
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                           <DropdownMenuItem onClick={() => openEditStudentDialog(student)} className="cursor-pointer">
+                                <Edit className="mr-2 h-4 w-4" /> Edit Student
+                           </DropdownMenuItem>
                            <DropdownMenuItem asChild>
                              <Link href="/billing" className="flex items-center w-full cursor-pointer">
-                                <CreditCard className="mr-2 h-4 w-4" /> Go to Billing
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 h-4 w-4 lucide lucide-credit-card"><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/></svg>
+                                Manage Fees
                              </Link>
                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => openPaymentHistoryDialog(student)} className="cursor-pointer">
-                                <History className="mr-2 h-4 w-4" /> Payment History
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => openRecordPaymentDialog(student)} className="cursor-pointer">
-                                <DollarSign className="mr-2 h-4 w-4" /> Record Payment
-                            </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <AlertDialog>
                                 <AlertDialogTrigger asChild>
@@ -924,7 +579,7 @@ export default function StudentsPage() {
                                     <AlertDialogHeader>
                                     <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
                                     <AlertDialogDescription>
-                                        This action cannot be undone. This will permanently delete {student.name} and all their associated data, including payment history.
+                                        This action cannot be undone. This will permanently delete {student.name} and all their associated data, including payment history and photo.
                                     </AlertDialogDescription>
                                     </AlertDialogHeader>
                                     <AlertDialogFooter>
@@ -951,8 +606,7 @@ export default function StudentsPage() {
         </div>
       </ScrollArea>
       {renderStudentDialog()}
-      {renderPaymentHistoryDialog()}
-      {renderRecordPaymentDialog()}
     </>
   );
 }
+

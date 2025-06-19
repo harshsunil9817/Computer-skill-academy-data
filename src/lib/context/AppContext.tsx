@@ -24,7 +24,7 @@ interface AppContextType {
   updateCourse: (course: Course) => Promise<void>;
   deleteCourse: (courseId: string) => Promise<void>;
   addStudent: (student: StudentFormData) => Promise<void>;
-  updateStudent: (studentId: string, studentData: Partial<Omit<Student, 'id' | 'paymentHistory' | 'enrollmentDate'> & { enrollmentDate?: string | Date, paymentHistory?: Omit<PaymentRecord, 'id'>[] | PaymentRecord[] }>) => Promise<void>;
+  updateStudent: (studentId: string, studentData: Partial<Omit<Student, 'id' | 'paymentHistory' | 'enrollmentDate' | 'dob' >> & { enrollmentDate?: string; dob?: {day: string, month: string, year: string }; photoFile?: File | null; photoDataUri?: string | null; photoToBeRemoved?: boolean }) => Promise<void>;
   addPayment: (studentId: string, payment: Omit<PaymentRecord, 'id'>) => Promise<void>;
   deleteStudent: (studentId: string) => Promise<void>;
   clearAllPaymentHistories: () => Promise<void>;
@@ -36,6 +36,7 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 const mapDocToStudent = (docData: any): Student => ({
   ...docData,
   enrollmentDate: docData.enrollmentDate instanceof Timestamp ? docData.enrollmentDate.toDate().toISOString() : docData.enrollmentDate,
+  dob: docData.dob, // Keep as is from Firestore (should be an object)
   paymentHistory: docData.paymentHistory?.map((p: any) => ({
       ...p,
       date: p.date instanceof Timestamp ? p.date.toDate().toISOString() : p.date,
@@ -43,7 +44,6 @@ const mapDocToStudent = (docData: any): Student => ({
   photoUrl: docData.photoUrl || undefined,
 });
 
-// Helper function to convert data URI to File
 function dataURItoFile(dataURI: string, filename: string): File {
   const byteString = atob(dataURI.split(',')[1]);
   const mimeString = dataURI.split(',')[0].split(':')[1].split(';')[0];
@@ -54,6 +54,22 @@ function dataURItoFile(dataURI: string, filename: string): File {
   }
   return new File([ab], filename, { type: mimeString });
 }
+
+// Helper to extract Appwrite file ID from URL
+const getAppwriteFileIdFromUrl = (url: string): string | null => {
+    try {
+        const pathSegments = new URL(url).pathname.split('/');
+        // Assuming URL structure like /v1/storage/buckets/{BUCKET_ID}/files/{FILE_ID}/view
+        const fileIdIndex = pathSegments.indexOf('files') + 1;
+        if (fileIdIndex > 0 && fileIdIndex < pathSegments.length) {
+            return pathSegments[fileIdIndex];
+        }
+        return null;
+    } catch (e) {
+        console.error("Error parsing Appwrite URL for file ID:", e);
+        return null;
+    }
+};
 
 
 export const AppProvider = ({ children }: { children: ReactNode }) => {
@@ -161,7 +177,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       throw new Error("Database not available. Please try again later.");
     }
     const studentsCollectionRef = collection(db, 'students');
-
     let photoUrlToSave: string | undefined = undefined;
 
     try {
@@ -173,30 +188,25 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       }
 
       if (fileToUpload) {
-        console.log("Attempting to upload photo to Appwrite...");
         const fileUploadResponse = await appwriteStorage.createFile(
           APPWRITE_STUDENT_PHOTOS_BUCKET_ID,
           AppwriteID.unique(),
           fileToUpload
         );
-        console.log("Appwrite file upload response:", fileUploadResponse);
         const fileViewUrl = appwriteStorage.getFileView(APPWRITE_STUDENT_PHOTOS_BUCKET_ID, fileUploadResponse.$id);
         photoUrlToSave = fileViewUrl.href; 
-        console.log("Photo URL to save:", photoUrlToSave);
       }
     } catch (uploadError: any) {
       console.error("Error uploading photo to Appwrite:", uploadError);
-      // Set photoUrlToSave to null or undefined if you want to proceed without photo
-      // For now, we let it be undefined so the payload below handles it.
     }
 
-
-    const { enrollmentDate: enrollmentDateObj, photoFile, photoDataUri, ...restOfStudentData } = studentData;
+    const { enrollmentDate: enrollmentDateObj, dob: dobObj, photoFile, photoDataUri, ...restOfStudentData } = studentData;
     const isoEnrollmentDate = `${enrollmentDateObj.year}-${String(enrollmentDateObj.month).padStart(2, '0')}-${String(enrollmentDateObj.day).padStart(2, '0')}`;
-
+    
     const newStudentPayload: Omit<Student, 'id'> = {
       ...restOfStudentData,
       enrollmentDate: isoEnrollmentDate,
+      dob: dobObj, // Store DOB object directly
       status: 'enrollment_pending',
       paymentHistory: [],
       photoUrl: photoUrlToSave, 
@@ -206,9 +216,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       const payloadForFirestore: any = {
         ...newStudentPayload,
         enrollmentDate: Timestamp.fromDate(new Date(newStudentPayload.enrollmentDate)),
-        photoUrl: photoUrlToSave || null, // Ensure photoUrl is null if undefined
+        photoUrl: photoUrlToSave || null, 
       };
-
 
       const docRef = await addDoc(studentsCollectionRef, payloadForFirestore);
       setStudents((prev) => [...prev, mapDocToStudent({ ...newStudentPayload, id: docRef.id, photoUrl: photoUrlToSave || undefined })]);
@@ -218,40 +227,111 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const updateStudent = async (studentId: string, studentData: Partial<Omit<Student, 'id' | 'paymentHistory' | 'enrollmentDate'> & { enrollmentDate?: string | Date, paymentHistory?: Omit<PaymentRecord, 'id'>[] | PaymentRecord[] }>) => {
+  const updateStudent = async (
+    studentId: string, 
+    updateData: Partial<Omit<Student, 'id' | 'paymentHistory' | 'enrollmentDate' | 'dob' >> & { 
+        enrollmentDate?: string; 
+        dob?: {day: string, month: string, year: string }; 
+        photoFile?: File | null; 
+        photoDataUri?: string | null; 
+        photoToBeRemoved?: boolean 
+    }
+) => {
     if (!db) {
        console.error("Firestore 'db' not available for updateStudent");
        throw new Error("Database not available. Please try again later.");
     }
     const studentDocRef = doc(db, 'students', studentId);
+    const currentStudent = students.find(s => s.id === studentId);
 
-    const payloadForFirestore: Record<string, any> = { ...studentData };
+    if (!currentStudent) {
+        console.error("Student not found for update");
+        throw new Error("Student not found.");
+    }
 
-    if (studentData.enrollmentDate) {
-      payloadForFirestore.enrollmentDate = studentData.enrollmentDate instanceof Date
-                                          ? Timestamp.fromDate(studentData.enrollmentDate)
-                                          : Timestamp.fromDate(new Date(studentData.enrollmentDate));
+    let finalPhotoUrl: string | null | undefined = currentStudent.photoUrl;
+
+    // Handle photo update/removal
+    if (updateData.photoFile || updateData.photoDataUri) { // New photo provided
+        let fileToUpload: File | null = null;
+        if (updateData.photoFile) {
+            fileToUpload = updateData.photoFile;
+        } else if (updateData.photoDataUri) {
+            fileToUpload = dataURItoFile(updateData.photoDataUri, `student_photo_${Date.now()}.png`);
+        }
+
+        if (fileToUpload) {
+            try {
+                const fileUploadResponse = await appwriteStorage.createFile(
+                    APPWRITE_STUDENT_PHOTOS_BUCKET_ID,
+                    AppwriteID.unique(),
+                    fileToUpload
+                );
+                const newPhotoViewUrl = appwriteStorage.getFileView(APPWRITE_STUDENT_PHOTOS_BUCKET_ID, fileUploadResponse.$id);
+                finalPhotoUrl = newPhotoViewUrl.href;
+
+                // Delete old photo if exists
+                if (currentStudent.photoUrl) {
+                    const oldFileId = getAppwriteFileIdFromUrl(currentStudent.photoUrl);
+                    if (oldFileId) {
+                        await appwriteStorage.deleteFile(APPWRITE_STUDENT_PHOTOS_BUCKET_ID, oldFileId);
+                    }
+                }
+            } catch (uploadError) {
+                console.error("Error uploading new photo during update:", uploadError);
+                // Decide if you want to proceed without photo update or throw error
+            }
+        }
+    } else if (updateData.photoToBeRemoved && currentStudent.photoUrl) { // Photo explicitly removed
+        try {
+            const oldFileId = getAppwriteFileIdFromUrl(currentStudent.photoUrl);
+            if (oldFileId) {
+                await appwriteStorage.deleteFile(APPWRITE_STUDENT_PHOTOS_BUCKET_ID, oldFileId);
+            }
+            finalPhotoUrl = null;
+        } catch (deleteError) {
+            console.error("Error deleting existing photo during update:", deleteError);
+        }
     }
-    if (studentData.paymentHistory) {
-       payloadForFirestore.paymentHistory = studentData.paymentHistory.map(p => ({
-          ...p,
-          date: p.date instanceof Date ? Timestamp.fromDate(p.date) : Timestamp.fromDate(new Date(p.date)),
-      }));
+
+    const { photoFile, photoDataUri, photoToBeRemoved, ...restOfUpdateData } = updateData;
+    
+    const payloadForFirestore: Record<string, any> = { ...restOfUpdateData };
+
+    if (updateData.enrollmentDate) {
+      payloadForFirestore.enrollmentDate = Timestamp.fromDate(new Date(updateData.enrollmentDate));
     }
-    // Ensure photoUrl is not set to undefined
-    if (payloadForFirestore.hasOwnProperty('photoUrl') && payloadForFirestore.photoUrl === undefined) {
-        payloadForFirestore.photoUrl = null;
+    if (updateData.dob) { // dob is an object {day, month, year}
+        payloadForFirestore.dob = updateData.dob;
     }
+    
+    payloadForFirestore.photoUrl = finalPhotoUrl === undefined ? currentStudent.photoUrl : (finalPhotoUrl === null ? null : finalPhotoUrl);
+
+
+    // Remove undefined fields from payload to avoid Firestore errors
+    Object.keys(payloadForFirestore).forEach(key => {
+        if (payloadForFirestore[key] === undefined) {
+            delete payloadForFirestore[key];
+        }
+    });
 
 
     try {
       await updateDoc(studentDocRef, payloadForFirestore);
       setStudents((prevStudents) =>
-        prevStudents.map(s =>
-          s.id === studentId
-          ? mapDocToStudent({ ...s, ...studentData, enrollmentDate: studentData.enrollmentDate ? new Date(studentData.enrollmentDate).toISOString() : s.enrollmentDate, paymentHistory: studentData.paymentHistory ? studentData.paymentHistory.map(p=> ({...p, date: new Date(p.date).toISOString()})) : s.paymentHistory })
-          : s
-        )
+        prevStudents.map(s => {
+          if (s.id === studentId) {
+            const updatedStudentFields = { ...s, ...payloadForFirestore };
+            // Ensure dates are in correct string format for local state if they were Timestamps
+            if (payloadForFirestore.enrollmentDate instanceof Timestamp) {
+              updatedStudentFields.enrollmentDate = payloadForFirestore.enrollmentDate.toDate().toISOString();
+            }
+            // photoUrl is already handled and should be in correct format (string or null)
+            // dob is an object
+            return mapDocToStudent(updatedStudentFields); // Use mapDocToStudent for consistency
+          }
+          return s;
+        })
       );
     } catch (error: any) {
       console.error("Error updating student in Firestore:", error);
@@ -281,7 +361,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         const updatedPaymentHistory = [...currentStudent.paymentHistory, newPayment];
 
         let newStatus = currentStudent.status;
-        // If enrollment fee is paid and student was pending, activate them
         if (paymentData.type === 'enrollment' && currentStudent.status === 'enrollment_pending') {
             const course = courses.find(c => c.id === currentStudent.courseId);
             const enrollmentFeePaid = updatedPaymentHistory
@@ -326,7 +405,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       const studentToDelete = students.find(s => s.id === studentId);
       if (studentToDelete && studentToDelete.photoUrl) {
         try {
-          const fileId = studentToDelete.photoUrl.split('/files/')[1].split('/view')[0];
+          const fileId = getAppwriteFileIdFromUrl(studentToDelete.photoUrl);
           if (fileId) {
              await appwriteStorage.deleteFile(APPWRITE_STUDENT_PHOTOS_BUCKET_ID, fileId);
              console.log("Appwrite photo deleted:", fileId);
@@ -355,22 +434,17 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       const studentRef = doc(db, 'students', student.id);
       let newStatus = student.status;
       
-      // Check if enrollment was effectively paid before clearing history.
-      // This check needs to be against the *current* payment history.
       const course = courses.find(c => c.id === student.courseId);
       const enrollmentFeePaidAmount = student.paymentHistory
           .filter(p => p.type === 'enrollment')
           .reduce((sum, p) => sum + p.amount, 0);
       const wasEnrollmentFeeSufficientlyPaid = course && enrollmentFeePaidAmount >= course.enrollmentFee;
 
-
       if (student.status === 'completed_paid' || student.status === 'completed_unpaid' || student.status === 'active') {
         newStatus = wasEnrollmentFeeSufficientlyPaid ? 'active' : 'enrollment_pending';
       } else if (student.status === 'enrollment_pending') {
-        // If they were pending, they remain pending unless this clear operation somehow implied they should be active (which it shouldn't)
         newStatus = 'enrollment_pending';
       }
-      // 'left' status remains 'left'
 
       batch.update(studentRef, { paymentHistory: [], status: newStatus });
       updatedStudentsLocally.push({ ...student, paymentHistory: [], status: newStatus });
@@ -411,6 +485,3 @@ export const useAppContext = () => {
   }
   return context;
 };
-
-
-    
