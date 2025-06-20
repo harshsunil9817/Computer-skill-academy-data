@@ -51,11 +51,11 @@ export default function MainLayout({ children }: { children: ReactNode }) {
           </div>
 
           {/* Center: Academy Name & Powered by */}
-          <div className="flex-1 text-center px-2">
+          <div className="flex-1 text-center px-2 flex flex-col items-center justify-center">
             <h1 className="font-headline text-lg sm:text-xl lg:text-2xl font-bold text-primary truncate">
               Computer Skill Academy Nagra Ballia
             </h1>
-            <p className="text-xs text-muted-foreground mt-1">Powered by NEILIT</p>
+            <p className="text-sm text-muted-foreground mt-1">Powered by NEILIT</p>
           </div>
 
           {/* Right Corner: Spacer to balance logo */}
