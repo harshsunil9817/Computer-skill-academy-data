@@ -37,7 +37,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container flex h-20 max-w-screen-2xl items-center justify-between px-4">
           {/* Left Corner: NEILIT Logo */}
-          <div className="flex items-center justify-start" style={{ minWidth: '150px' }}>
+          <div className="flex flex-col items-start justify-center" style={{ minWidth: '150px' }}>
             <Link href="/" aria-label="Home">
               <Image
                 src="https://placehold.co/100x40.png"
@@ -55,7 +55,9 @@ export default function MainLayout({ children }: { children: ReactNode }) {
             <h1 className="font-headline text-lg sm:text-xl lg:text-2xl font-bold text-primary truncate">
               Computer Skill Academy Nagra Ballia
             </h1>
-            <p className="text-sm text-muted-foreground mt-1">Powered by NEILIT</p>
+            <p className="text-base font-medium text-foreground mt-1">
+              Powered by National Institute of Electronics & Information Technology (NEILIT)
+            </p>
           </div>
 
           {/* Right Corner: Spacer to balance logo */}
