@@ -40,7 +40,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
           <div className="flex flex-col items-start justify-center" style={{ minWidth: '150px' }}>
             <Link href="/" aria-label="Home">
               <Image
-                src="/download.png" // Make sure download.png is in the /public folder
+                src="https://drive.google.com/uc?export=view&id=1vHRrnuM9NfkaFIgdQihUoKP4z5b1uUu6"
                 alt="Academy Logo"
                 width={100}
                 height={40}
