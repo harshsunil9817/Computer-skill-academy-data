@@ -33,32 +33,33 @@ export default function MainLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex flex-col min-h-screen bg-background">
-      {/* Top Header: Logo and Academy Name */}
+      {/* Top Header */}
       <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container flex h-16 max-w-screen-2xl items-center justify-between px-4">
-          {/* Left Corner: NEILIT Logo Placeholder */}
-          <div className="flex items-center" style={{ minWidth: '100px' }}> {/* Ensure space for logo */}
+        <div className="container flex h-20 max-w-screen-2xl items-center justify-between px-4">
+          {/* Left Corner: NEILIT Logo & "Powered by" */}
+          <div className="flex flex-col items-start justify-center" style={{ minWidth: '150px' }}> {/* Adjusted minWidth */}
             <Link href="/" aria-label="Home">
-              <Image 
-                src="https://placehold.co/100x40.png" 
-                alt="NEILIT Logo" 
-                width={100} 
+              <Image
+                src="https://placehold.co/100x40.png"
+                alt="NEILIT Logo"
+                width={100}
                 height={40}
-                data-ai-hint="NEILIT logo" 
+                data-ai-hint="NEILIT logo"
                 priority
               />
             </Link>
+            <p className="text-xs text-muted-foreground mt-1">Powered by NEILIT</p>
           </div>
 
           {/* Center: Academy Name */}
-          <div className="flex-1 text-center">
-            <h1 className="font-headline text-lg sm:text-xl font-bold text-primary truncate">
+          <div className="flex-1 text-center px-2">
+            <h1 className="font-headline text-lg sm:text-xl lg:text-2xl font-bold text-primary truncate">
               Computer Skill Academy Nagra Ballia
             </h1>
           </div>
-          
-          {/* Right Corner: Spacer to balance logo */}
-          <div style={{ minWidth: '100px' }} className="hidden sm:block"> {/* Hide spacer on very small screens if needed */}
+
+          {/* Right Corner: Spacer to balance logo and "Powered by" text */}
+          <div style={{ minWidth: '150px' }} className="hidden sm:block"> {/* Adjusted minWidth */}
             {/* Empty or potentially a small non-navigational element */}
           </div>
         </div>
@@ -79,7 +80,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
               className={cn(
                 "flex flex-col items-center justify-center space-y-1 flex-1 p-1 h-full rounded-md text-xs font-medium transition-colors",
                 pathname === item.href
-                  ? "text-primary bg-primary/10" // More subtle active state for bottom nav
+                  ? "text-primary bg-primary/10"
                   : "text-muted-foreground hover:text-primary hover:bg-primary/5",
                 "focus:outline-none focus:ring-1 focus:ring-ring focus:ring-offset-1 focus:ring-offset-background"
               )}
@@ -91,14 +92,14 @@ export default function MainLayout({ children }: { children: ReactNode }) {
           ))}
         </div>
       </nav>
-      
+
       <footer className="py-6 md:px-8 bg-background border-t border-border/40 text-center">
         <div className="container flex flex-col items-center justify-center gap-2">
           <p className="text-balance text-sm leading-loose text-muted-foreground">
             &copy; {new Date().getFullYear()} {APP_NAME}.
           </p>
           <p className="text-xs text-muted-foreground">
-            Powered by NEILIT (National Institute of Electronics & Information Technology). All rights reserved.
+            Powered by National Institute of Electronics & Information Technology (NEILIT). All rights reserved.
           </p>
         </div>
       </footer>
