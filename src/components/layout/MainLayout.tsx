@@ -36,8 +36,8 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       {/* Top Header */}
       <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container flex h-20 max-w-screen-2xl items-center justify-between px-4">
-          {/* Left Corner: NEILIT Logo & "Powered by" */}
-          <div className="flex flex-col items-start justify-center" style={{ minWidth: '150px' }}> {/* Adjusted minWidth */}
+          {/* Left Corner: NEILIT Logo */}
+          <div className="flex items-center justify-start" style={{ minWidth: '150px' }}>
             <Link href="/" aria-label="Home">
               <Image
                 src="https://placehold.co/100x40.png"
@@ -48,17 +48,17 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                 priority
               />
             </Link>
-            <p className="text-xs text-muted-foreground mt-1">Powered by NEILIT</p>
           </div>
 
-          {/* Center: Academy Name */}
+          {/* Center: Academy Name & Powered by */}
           <div className="flex-1 text-center px-2">
             <h1 className="font-headline text-lg sm:text-xl lg:text-2xl font-bold text-primary truncate">
               Computer Skill Academy Nagra Ballia
             </h1>
+            <p className="text-xs text-muted-foreground mt-1">Powered by NEILIT</p>
           </div>
 
-          {/* Right Corner: Spacer to balance logo and "Powered by" text */}
+          {/* Right Corner: Spacer to balance logo */}
           <div style={{ minWidth: '150px' }} className="hidden sm:block">
             {/* Empty or potentially a small non-navigational element */}
           </div>
