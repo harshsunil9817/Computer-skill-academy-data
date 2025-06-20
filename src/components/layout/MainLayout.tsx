@@ -39,11 +39,17 @@ export default function MainLayout({ children }: { children: ReactNode }) {
           {/* Left Corner: NEILIT Logo */}
           <div className="flex flex-col items-start justify-center" style={{ minWidth: '150px' }}>
             <Link href="/" aria-label="Home">
+              {/* 
+                To add your actual logo:
+                1. Place your logo image (e.g., neilit-logo.png) in the `public` folder of your project.
+                2. Change the `src` attribute below from "https://placehold.co/100x40.png" to "/your-logo-filename.png" (e.g., "/neilit-logo.png").
+                3. Adjust width and height attributes as needed.
+              */}
               <Image
-                src="https://placehold.co/100x40.png"
+                src="https://placehold.co/100x40.png" 
                 alt="NEILIT Logo"
-                width={100}
-                height={40}
+                width={100} 
+                height={40} 
                 data-ai-hint="NEILIT logo"
                 priority
               />
