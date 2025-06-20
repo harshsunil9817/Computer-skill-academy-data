@@ -46,11 +46,10 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                 3. Adjust width and height attributes as needed.
               */}
               <Image
-                src="https://placehold.co/100x40.png" 
-                alt="NEILIT Logo"
+                src="/download.png" 
+                alt="Academy Logo"
                 width={100} 
                 height={40} 
-                data-ai-hint="NEILIT logo"
                 priority
               />
             </Link>
