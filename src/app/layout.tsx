@@ -3,9 +3,10 @@ import './globals.css';
 import { AppProvider } from '@/lib/context/AppContext';
 import MainLayout from '@/components/layout/MainLayout';
 import { Toaster } from "@/components/ui/toaster";
+import { APP_NAME } from '@/lib/constants';
 
 export const metadata: Metadata = {
-  title: 'Computer Skill Academy Student Data',
+  title: APP_NAME,
   description: 'Manage your computer academy with ease.',
 };
 
