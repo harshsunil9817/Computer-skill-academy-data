@@ -59,7 +59,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
           </div>
 
           {/* Right Corner: Spacer to balance logo and "Powered by" text */}
-          <div style={{ minWidth: '150px' }} className="hidden sm:block"> {/* Adjusted minWidth */}
+          <div style={{ minWidth: '150px' }} className="hidden sm:block">
             {/* Empty or potentially a small non-navigational element */}
           </div>
         </div>
