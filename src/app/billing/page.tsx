@@ -231,7 +231,7 @@ export default function BillingPage() {
             </CardContent>
           </Card>
           
-          {/* Center Column - Fee Details & Custom Fees */}
+          {/* Center Column - Fee Details */}
           <Card className="lg:col-span-1 shadow-lg">
              <CardHeader>
               <CardTitle className="font-headline text-primary">{selectedStudent.name} ({selectedStudent.enrollmentNumber || 'N/A'})</CardTitle>
@@ -239,6 +239,33 @@ export default function BillingPage() {
             </CardHeader>
             <CardContent className="space-y-6">
                 <FeeDetailsTabs student={selectedStudent} course={selectedStudentCourse} onPay={handlePaySpecificFee} />
+            </CardContent>
+          </Card>
+
+          {/* Right Column - Payments & Custom Fees */}
+          <Card className="lg:col-span-1 shadow-lg">
+            <CardHeader>
+                <CardTitle className="flex items-center text-primary font-headline"><Banknote className="mr-2 h-5 w-5" />Actions</CardTitle>
+                 <CardDescription>Record payments or add custom fees for this student.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+                {/* General Payment Section */}
+                <div className="p-4 border rounded-lg bg-background">
+                    <h3 className="font-semibold mb-3">Record General Payment</h3>
+                    <div className="space-y-3">
+                        <div>
+                            <Label htmlFor="genPayAmount">Amount (₹)</Label>
+                            <Input id="genPayAmount" type="number" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} placeholder="Enter amount to pay"/>
+                        </div>
+                        <div>
+                            <Label htmlFor="genPayRemarks">Remarks (Optional)</Label>
+                            <Textarea id="genPayRemarks" value={paymentRemarks} onChange={e => setPaymentRemarks(e.target.value)} placeholder="e.g. Cash from parent" />
+                        </div>
+                        <Button onClick={handlePaymentSubmit} className="w-full" disabled={!paymentAmount}>Submit Payment</Button>
+                    </div>
+                </div>
+
+                <Separator />
                 
                 {/* Custom Fee Section */}
                 <div className="p-4 border rounded-lg bg-background">
@@ -257,30 +284,6 @@ export default function BillingPage() {
                            <Label htmlFor="isCustomFeePaid" className="text-sm font-normal">Mark as already paid</Label>
                         </div>
                         <Button onClick={handleAddCustomFee} className="w-full" disabled={!customFeeName || !customFeeAmount}>Add Fee</Button>
-                    </div>
-                </div>
-            </CardContent>
-          </Card>
-
-          {/* Right Column - Payments */}
-          <Card className="lg:col-span-1 shadow-lg">
-            <CardHeader>
-                <CardTitle className="flex items-center text-primary font-headline"><Banknote className="mr-2 h-5 w-5" />Record General Payment</CardTitle>
-                 <CardDescription>Record a general payment towards any outstanding dues.</CardDescription>
-            </CardHeader>
-            <CardContent>
-                {/* General Payment Section */}
-                <div className="p-4 border rounded-lg bg-background">
-                    <div className="space-y-3">
-                        <div>
-                            <Label htmlFor="genPayAmount">Amount (₹)</Label>
-                            <Input id="genPayAmount" type="number" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} placeholder="Enter amount to pay"/>
-                        </div>
-                        <div>
-                            <Label htmlFor="genPayRemarks">Remarks (Optional)</Label>
-                            <Textarea id="genPayRemarks" value={paymentRemarks} onChange={e => setPaymentRemarks(e.target.value)} placeholder="e.g. Cash from parent" />
-                        </div>
-                        <Button onClick={handlePaymentSubmit} className="w-full" disabled={!paymentAmount}>Submit Payment</Button>
                     </div>
                 </div>
             </CardContent>
