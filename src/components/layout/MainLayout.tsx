@@ -20,7 +20,6 @@ const mainNavItems: NavItem[] = [
   { href: '/students', label: 'Students', icon: Users },
   { href: '/billing', label: 'Billing', icon: CreditCard },
   { href: '/archived-students', label: 'Archived', icon: UserX },
-  { href: '/intervention', label: 'AI Intervention', icon: Brain },
 ];
 
 const settingsNavItem: NavItem = { href: '/settings', label: 'Settings', icon: Cog };
