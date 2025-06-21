@@ -2,11 +2,12 @@
 "use client";
 import { useEffect, useState } from 'react';
 import { Users, DollarSign, UserPlus, TrendingUp, Loader2, IndianRupee } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
 import { useAppContext } from '@/lib/context/AppContext';
 import type { Student, Course } from '@/lib/types';
 import { format, parseISO, addMonths, startOfMonth, isBefore, getMonth, getYear } from 'date-fns';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 interface StatCardProps {
   title: string;
@@ -98,7 +99,7 @@ export default function DashboardPage() {
             // Check if current month is within the student's active course time
             if (!isBefore(currentDate, startOfMonth(courseStartDate)) && isBefore(startOfMonth(currentDate), courseEndDate)) {
                 const paidForCurrentMonth = (student.paymentHistory || [])
-                    .filter(p => p.type === 'monthly' && p.referenceId === currentMonthStr)
+                    .filter(p => (p.type === 'monthly' && p.referenceId === currentMonthStr) || (p.type === 'partial' && p.remarks?.includes(currentMonthStr)))
                     .reduce((sum, p) => sum + p.amount, 0);
                 
                 const dueForMonth = Math.max(0, course.monthlyFee - paidForCurrentMonth);
@@ -113,14 +114,17 @@ export default function DashboardPage() {
 
         totalBilled += course.enrollmentFee;
         totalBilled += (course.examFees || []).reduce((sum, fee) => sum + fee.amount, 0);
-        totalBilled += (student.customFees || []).filter(f => f.status === 'due').reduce((sum, fee) => sum + fee.amount, 0);
+        totalBilled += (student.customFees || []).reduce((sum, fee) => sum + fee.amount, 0);
 
         if (course.paymentType === 'monthly') {
-            const startDate = startOfMonth(enrollmentDate);
+            const startDate = startOfMonth(parseISO(student.enrollmentDate));
             const endDate = new Date();
-            const monthsDifference = (endDate.getFullYear() - startDate.getFullYear()) * 12 + (endDate.getMonth() - startDate.getMonth());
+            let monthsToBill = 0;
+            if (isBefore(startDate, endDate)) {
+              monthsToBill = (endDate.getFullYear() - startDate.getFullYear()) * 12 + (endDate.getMonth() - startDate.getMonth()) + 1;
+            }
             const courseDurationInMonths = student.courseDurationValue * (student.courseDurationUnit === 'years' ? 12 : 1);
-            const numberOfBillableMonths = Math.min(Math.max(0, monthsDifference + 1), courseDurationInMonths);
+            const numberOfBillableMonths = Math.min(Math.max(0, monthsToBill), courseDurationInMonths);
             totalBilled += numberOfBillableMonths * course.monthlyFee;
         } else if (course.paymentType === 'installment' && student.selectedPaymentPlanName) {
             const plan = (course.paymentPlans || []).find(p => p.name === student.selectedPaymentPlanName);
@@ -147,6 +151,10 @@ export default function DashboardPage() {
     setIsCalculatingStats(false);
 
   }, [students, courses, isAppContextLoading]);
+
+  const activeStudentsForActivity = students
+    .filter(s => s.status === 'active' || s.status === 'enrollment_pending')
+    .sort((a, b) => parseISO(b.enrollmentDate).getTime() - parseISO(a.enrollmentDate).getTime());
 
   if (isAppContextLoading) {
     return <div className="text-center py-10">Loading dashboard data...</div>;
@@ -201,23 +209,26 @@ export default function DashboardPage() {
         <Card className="shadow-lg">
           <CardHeader>
             <CardTitle>Recent Activity</CardTitle>
+            <CardDescription>All active students sorted by most recent enrollment.</CardDescription>
           </CardHeader>
           <CardContent>
             {isCalculatingStats ? (
-                 <div className="flex items-center text-muted-foreground">
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    <span>Loading recent activity...</span>
+              <div className="flex items-center text-muted-foreground">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <span>Loading recent activity...</span>
+              </div>
+            ) : activeStudentsForActivity.length > 0 ? (
+              <ScrollArea className="h-[250px] pr-4">
+                 <div className="space-y-2">
+                  {activeStudentsForActivity.map(s => (
+                    <div key={s.id} className="text-sm p-2 border rounded-md bg-background hover:bg-muted transition-colors">
+                      <span className="font-medium text-primary">{s.name}</span> joined on <span className="font-medium">{new Date(s.enrollmentDate).toLocaleDateString()}</span>
+                    </div>
+                  ))}
                  </div>
-            ) : students.length > 0 ? (
-              students.filter(s => s.status === 'active' || s.status === 'enrollment_pending')
-                .sort((a,b) => parseISO(b.enrollmentDate).getTime() - parseISO(a.enrollmentDate).getTime())
-                .slice(0, 3)
-                .map(s => <div key={s.id} className="py-1">{s.name} joined on {new Date(s.enrollmentDate).toLocaleDateString()}</div>)
+              </ScrollArea>
             ) : (
-              <p className="text-muted-foreground">No recent student activity to display.</p>
-            )}
-            {!isCalculatingStats && students.filter(s => s.status === 'active' || s.status === 'enrollment_pending').length === 0 && (
-                 <p className="text-muted-foreground">No active students to display recent activity for.</p>
+              <p className="text-muted-foreground">No active students to display recent activity for.</p>
             )}
           </CardContent>
         </Card>
