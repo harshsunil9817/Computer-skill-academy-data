@@ -49,10 +49,11 @@ export default function BillingPage() {
 
   const searchedStudents = useMemo(() => {
     if (!searchTerm.trim()) return [];
+    const lowercasedSearchTerm = searchTerm.toLowerCase();
     return activeStudents.filter(student =>
-      student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      student.fatherName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (student.enrollmentNumber && student.enrollmentNumber.toLowerCase().includes(searchTerm.toLowerCase()))
+      student.name.toLowerCase().startsWith(lowercasedSearchTerm) ||
+      student.fatherName.toLowerCase().startsWith(lowercasedSearchTerm) ||
+      (student.enrollmentNumber && student.enrollmentNumber.toLowerCase().startsWith(lowercasedSearchTerm))
     );
   }, [searchTerm, activeStudents]);
 
@@ -245,8 +246,8 @@ export default function BillingPage() {
           {/* Right Column - Payments & Custom Fees */}
           <Card className="lg:col-span-1 shadow-lg">
             <CardHeader>
-                <CardTitle className="flex items-center text-primary font-headline"><Banknote className="mr-2 h-5 w-5" />Record General Payment</CardTitle>
-                 <CardDescription>Record general payments for this student.</CardDescription>
+                <CardTitle className="flex items-center text-primary font-headline"><Banknote className="mr-2 h-5 w-5" />Actions</CardTitle>
+                 <CardDescription>Record payments or add custom fees.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
                 {/* General Payment Section */}
