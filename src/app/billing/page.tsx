@@ -231,26 +231,46 @@ export default function BillingPage() {
             </CardContent>
           </Card>
           
-          {/* Center Column - Fee Details */}
+          {/* Center Column - Fee Details & Custom Fees */}
           <Card className="lg:col-span-1 shadow-lg">
              <CardHeader>
               <CardTitle className="font-headline text-primary">{selectedStudent.name} ({selectedStudent.enrollmentNumber || 'N/A'})</CardTitle>
               <CardDescription>Course: {selectedStudentCourse.name}</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-6">
                 <FeeDetailsTabs student={selectedStudent} course={selectedStudentCourse} onPay={handlePaySpecificFee} />
+                
+                {/* Custom Fee Section */}
+                <div className="p-4 border rounded-lg bg-background">
+                    <h3 className="font-semibold mb-3 flex items-center"><FilePlus className="mr-2 h-5 w-5" />Add Custom Fee</h3>
+                    <div className="space-y-3">
+                        <div>
+                            <Label htmlFor="customFeeName">Fee Name</Label>
+                            <Input id="customFeeName" value={customFeeName} onChange={(e) => setCustomFeeName(e.target.value)} placeholder="e.g. Late Fee, Book Fee" />
+                        </div>
+                         <div>
+                            <Label htmlFor="customFeeAmount">Amount (₹)</Label>
+                            <Input id="customFeeAmount" type="number" value={customFeeAmount} onChange={(e) => setCustomFeeAmount(e.target.value)} placeholder="Enter amount"/>
+                        </div>
+                        <div className="flex items-center space-x-2 pt-1">
+                           <Checkbox id="isCustomFeePaid" checked={isCustomFeePaid} onCheckedChange={(checked) => setIsCustomFeePaid(!!checked)} />
+                           <Label htmlFor="isCustomFeePaid" className="text-sm font-normal">Mark as already paid</Label>
+                        </div>
+                        <Button onClick={handleAddCustomFee} className="w-full" disabled={!customFeeName || !customFeeAmount}>Add Fee</Button>
+                    </div>
+                </div>
             </CardContent>
           </Card>
 
           {/* Right Column - Payments */}
           <Card className="lg:col-span-1 shadow-lg">
             <CardHeader>
-                <CardTitle className="flex items-center text-primary font-headline"><Banknote className="mr-2 h-5 w-5" />Record Payments</CardTitle>
+                <CardTitle className="flex items-center text-primary font-headline"><Banknote className="mr-2 h-5 w-5" />Record General Payment</CardTitle>
+                 <CardDescription>Record a general payment towards any outstanding dues.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6">
+            <CardContent>
                 {/* General Payment Section */}
                 <div className="p-4 border rounded-lg bg-background">
-                    <h3 className="font-semibold mb-2">Record General Payment</h3>
                     <div className="space-y-3">
                         <div>
                             <Label htmlFor="genPayAmount">Amount (₹)</Label>
@@ -261,28 +281,6 @@ export default function BillingPage() {
                             <Textarea id="genPayRemarks" value={paymentRemarks} onChange={e => setPaymentRemarks(e.target.value)} placeholder="e.g. Cash from parent" />
                         </div>
                         <Button onClick={handlePaymentSubmit} className="w-full" disabled={!paymentAmount}>Submit Payment</Button>
-                    </div>
-                </div>
-
-                <Separator />
-                
-                {/* Custom Fee Section */}
-                <div className="p-4 border rounded-lg bg-background">
-                    <h3 className="font-semibold mb-2">Add Custom Fee</h3>
-                    <div className="space-y-3">
-                        <div>
-                            <Label htmlFor="customFeeName">Fee Name</Label>
-                            <Input id="customFeeName" value={customFeeName} onChange={(e) => setCustomFeeName(e.target.value)} placeholder="e.g. Late Fee, Book Fee" />
-                        </div>
-                         <div>
-                            <Label htmlFor="customFeeAmount">Amount (₹)</Label>
-                            <Input id="customFeeAmount" type="number" value={customFeeAmount} onChange={(e) => setCustomFeeAmount(e.target.value)} placeholder="Enter amount"/>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                           <Checkbox id="isCustomFeePaid" checked={isCustomFeePaid} onCheckedChange={(checked) => setIsCustomFeePaid(!!checked)} />
-                           <Label htmlFor="isCustomFeePaid" className="text-sm font-normal">Mark as already paid</Label>
-                        </div>
-                        <Button onClick={handleAddCustomFee} className="w-full" disabled={!customFeeName || !customFeeAmount}>Add Fee</Button>
                     </div>
                 </div>
             </CardContent>
@@ -387,7 +385,7 @@ function FeeDetailsTabs({student, course, onPay}: {student: Student, course: Cou
                 <TabsTrigger value="exam"><BookCopy className="mr-2 h-4 w-4"/>Exam Fees</TabsTrigger>
                 <TabsTrigger value="custom"><FilePlus className="mr-2 h-4 w-4"/>Custom</TabsTrigger>
             </TabsList>
-            <ScrollArea className="h-[calc(100vh-32rem)] mt-4">
+            <ScrollArea className="h-[calc(100vh-42rem)] mt-4">
                 <div className="pr-3 space-y-4">
                  {/* Enrollment Fee always on top */}
                  <Card>
