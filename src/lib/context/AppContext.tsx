@@ -2,6 +2,7 @@
 "use client";
 import type { ReactNode } from 'react';
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import type { Course, Student, PaymentRecord, StudentFormData, CourseFormData, PaymentPlan, ExamFee, CustomFee } from '@/lib/types';
 import { db, app as firebaseAppInstance } from '@/lib/firebase';
 import {
@@ -32,6 +33,9 @@ interface AppContextType {
   updateCustomFeeStatus: (studentId: string, feeId: string, status: 'paid' | 'due') => Promise<void>;
   clearAllPaymentHistories: () => Promise<void>;
   isLoading: boolean;
+  isAuthenticated: boolean;
+  login: (user: string, pass: string) => boolean;
+  logout: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -89,21 +93,31 @@ const PREDEFINED_COURSES: Omit<Course, 'id'>[] = [
     { name: "SQL", enrollmentFee: 0, paymentType: 'installment', monthlyFee: 0, paymentPlans: [{name: "One-Time", totalAmount: 2500, installments: [2500]}, {name: "Two Installments", totalAmount: 2700, installments: [1350, 1350]}, {name: "Three Installments", totalAmount: 2700, installments: [900, 900, 900]}], examFees: [] },
     { name: "ADCA", enrollmentFee: 550, paymentType: 'monthly', monthlyFee: 500, paymentPlans: [], examFees: [{name: "Exam Fee", amount: 300}] },
     { name: "ADFA", enrollmentFee: 550, paymentType: 'monthly', monthlyFee: 500, paymentPlans: [], examFees: [{name: "Exam Fee", amount: 300}] },
-    { name: "O Level", enrollmentFee: 1250, paymentType: 'monthly', monthlyFee: 500, paymentPlans: [], examFees: [{name: "M1 Exam Fee", amount: 1250}, {name: "M2 Exam Fee", amount: 1250}, {name: "M3 Exam Fee", amount: 1250}, {name: "M4 Exam Fee", amount: 1250}, {name: "Practical Exam Fee", amount: 900}] },
+    { name: "O Level", enrollmentFee: 1250, paymentType: 'monthly', monthlyFee: 500, paymentPlans: [], examFees: [{name: "M1 Exam + Practical", amount: 2150}, {name: "M2 Exam + Practical", amount: 2150}, {name: "M3 Exam + Practical", amount: 2150}, {name: "M4 Exam + Practical", amount: 2150}]}
 ];
 
 
 export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [courses, setCourses] = useState<Course[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isAppContextLoading, setAppContextIsLoading] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const router = useRouter();
+
 
   useEffect(() => {
+    const authStatus = localStorage.getItem('isAuthenticated');
+    if (authStatus === 'true') {
+      setIsAuthenticated(true);
+    }
+    setIsAuthLoading(false);
+
     const fetchData = async () => {
-      setIsLoading(true);
+      setAppContextIsLoading(true);
       if (!db) {
         console.error("AppContext: Firestore 'db' instance is not available. Halting data fetch.");
-        setIsLoading(false);
+        setAppContextIsLoading(false);
         return;
       }
       try {
@@ -115,7 +129,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         const courseSnapshot = await getDocs(coursesCollectionRef);
         let existingCourses = courseSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Course));
         
-        // Seed predefined courses if they don't exist
         const batch = writeBatch(db);
         let hasChanges = false;
         for (const pc of PREDEFINED_COURSES) {
@@ -135,11 +148,26 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       } catch (error) {
         console.error("AppContext: Failed to load data from Firestore.", error);
       } finally {
-        setIsLoading(false);
+        setAppContextIsLoading(false);
       }
     };
     fetchData();
   }, []);
+
+  const login = (user: string, pass: string): boolean => {
+    if (user === 'sunilsir' && pass === 'sunil817') {
+      localStorage.setItem('isAuthenticated', 'true');
+      setIsAuthenticated(true);
+      return true;
+    }
+    return false;
+  };
+
+  const logout = () => {
+    localStorage.removeItem('isAuthenticated');
+    setIsAuthenticated(false);
+    router.push('/login');
+  };
 
   const addCourse = async (courseData: Omit<Course, 'id'>) => {
     if (!db) throw new Error("Database not available.");
@@ -388,6 +416,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     const existingStudents = studentSnapshot.docs.map(doc => mapDocToStudent({ ...doc.data(), id: doc.id }));
     setStudents(existingStudents);
   };
+  
+  const isLoading = isAppContextLoading || isAuthLoading;
 
   return (
     <AppContext.Provider value={{
@@ -403,7 +433,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         addCustomFee,
         updateCustomFeeStatus,
         clearAllPaymentHistories,
-        isLoading
+        isLoading,
+        isAuthenticated,
+        login,
+        logout,
     }}>
       {children}
     </AppContext.Provider>

@@ -4,9 +4,11 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, BookOpen, Users, CreditCard, UserX, Brain, Cog } from 'lucide-react';
+import { LayoutDashboard, BookOpen, Users, CreditCard, UserX, Cog, LogOut } from 'lucide-react';
 import { APP_NAME } from '@/lib/constants';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { useAppContext } from '@/lib/context/AppContext';
 
 interface NavItem {
   href: string;
@@ -29,6 +31,7 @@ const bottomNavItems: NavItem[] = [...mainNavItems, settingsNavItem];
 
 export default function MainLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const { logout } = useAppContext();
 
   return (
     <div className="flex flex-col min-h-screen bg-background">
@@ -94,13 +97,13 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       </nav>
 
       <footer className="py-6 md:px-8 bg-background border-t border-border/40 text-center">
-        <div className="container flex flex-col items-center justify-center gap-2">
-          <p className="text-balance text-sm leading-loose text-muted-foreground">
+        <div className="container flex flex-col items-center justify-center gap-4">
+          <Button variant="outline" size="sm" onClick={logout}>
+            <LogOut className="mr-2 h-4 w-4" /> Logout
+          </Button>
+          <div className="text-balance text-sm text-muted-foreground">
             &copy; {new Date().getFullYear()} {APP_NAME}.
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Powered by National Institute of Electronics & Information Technology (NEILIT). All rights reserved.
-          </p>
+          </div>
         </div>
       </footer>
     </div>

@@ -99,7 +99,7 @@ export default function DashboardPage() {
             // Check if current month is within the student's active course time
             if (!isBefore(currentDate, startOfMonth(courseStartDate)) && isBefore(startOfMonth(currentDate), courseEndDate)) {
                 const paidForCurrentMonth = (student.paymentHistory || [])
-                    .filter(p => (p.type === 'monthly' && p.referenceId === currentMonthStr) || (p.type === 'partial' && p.remarks?.includes(currentMonthStr)))
+                    .filter(p => p.type === 'monthly' && p.referenceId === currentMonthStr)
                     .reduce((sum, p) => sum + p.amount, 0);
                 
                 const dueForMonth = Math.max(0, course.monthlyFee - paidForCurrentMonth);

@@ -1,9 +1,8 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { AppProvider } from '@/lib/context/AppContext';
-import MainLayout from '@/components/layout/MainLayout';
-import { Toaster } from "@/components/ui/toaster";
 import { APP_NAME } from '@/lib/constants';
+import AuthWrapper from '@/components/layout/AuthWrapper';
 
 export const metadata: Metadata = {
   title: APP_NAME,
@@ -25,8 +24,7 @@ export default function RootLayout({
       </head>
       <body className="font-body antialiased">
         <AppProvider>
-          <MainLayout>{children}</MainLayout>
-          <Toaster />
+          <AuthWrapper>{children}</AuthWrapper>
         </AppProvider>
       </body>
     </html>
