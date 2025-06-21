@@ -117,7 +117,7 @@ export default function BillingPage() {
   };
 
   const handlePaySpecificFee = async (
-    type: 'enrollment' | 'exam' | 'custom' | 'installment', 
+    type: 'enrollment' | 'exam' | 'custom' | 'installment' | 'monthly', 
     amount: number, 
     description: string, 
     referenceId: string
@@ -330,7 +330,7 @@ function FeeDetailsTabs({student, course, onPay}: {student: Student, course: Cou
         if(course.paymentType !== 'monthly') return { monthlyDues: [] };
         let dues = [];
         const enrollmentDate = parseISO(student.enrollmentDate);
-        const firstBillableMonth = addMonths(startOfMonth(enrollmentDate), 1);
+        const firstBillableMonth = startOfMonth(enrollmentDate); // Bill from enrollment month itself
         const courseDurationInMonths = student.courseDurationValue * (student.courseDurationUnit === 'years' ? 12 : 1);
         
         for (let i=0; i<courseDurationInMonths; i++) {
@@ -347,14 +347,12 @@ function FeeDetailsTabs({student, course, onPay}: {student: Student, course: Cou
             
             const totalPaid = paidForMonth + partialsApplied;
 
-            if (isBefore(monthDate, addMonths(new Date(), 1))) {
-                dues.push({
-                    monthYear: monthYearStr,
-                    amount: course.monthlyFee,
-                    paid: totalPaid,
-                    due: Math.max(0, course.monthlyFee - totalPaid),
-                });
-            }
+            dues.push({
+                monthYear: monthYearStr,
+                amount: course.monthlyFee,
+                paid: totalPaid,
+                due: Math.max(0, course.monthlyFee - totalPaid),
+            });
         }
         return { monthlyDues: dues };
     }, [student, course]);

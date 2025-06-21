@@ -73,6 +73,7 @@ export interface CourseFormData {
   enrollmentFee: number;
   paymentType: 'monthly' | 'installment';
   monthlyFee: number;
+  examFees: ExamFee[];
 }
 
 export interface StudentFormData {

@@ -16,7 +16,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
 import { useAppContext } from '@/lib/context/AppContext';
-import type { Course, CourseFormData } from '@/lib/types';
+import type { Course, CourseFormData, ExamFee } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
@@ -26,6 +26,7 @@ const initialCourseFormState: CourseFormData = {
   enrollmentFee: 0,
   paymentType: 'monthly',
   monthlyFee: 0,
+  examFees: [],
 };
 
 export default function CoursesPage() {
@@ -33,6 +34,7 @@ export default function CoursesPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [courseForm, setCourseForm] = useState<CourseFormData>(initialCourseFormState);
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
+  const [newExamFee, setNewExamFee] = useState({ name: '', amount: '' });
   const { toast } = useToast();
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -42,6 +44,26 @@ export default function CoursesPage() {
       ...prev,
       [name]: isNumericField ? parseFloat(value) || 0 : value,
     }));
+  };
+
+  const handleAddExamFee = () => {
+    const amount = parseFloat(newExamFee.amount);
+    if (newExamFee.name && !isNaN(amount) && amount > 0) {
+        setCourseForm(prev => ({
+            ...prev,
+            examFees: [...(prev.examFees || []), { name: newExamFee.name, amount }]
+        }));
+        setNewExamFee({ name: '', amount: '' }); // Reset form
+    } else {
+        toast({ title: "Error", description: "Please enter a valid fee name and a positive amount.", variant: "destructive" });
+    }
+  };
+
+  const handleRemoveExamFee = (index: number) => {
+      setCourseForm(prev => ({
+          ...prev,
+          examFees: (prev.examFees || []).filter((_, i) => i !== index)
+      }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -59,23 +81,24 @@ export default function CoursesPage() {
     
     try {
       if (editingCourse) {
-        // Preserve existing complex properties when editing basic details
         const coursePayload: Course = {
             ...editingCourse,
             name: courseForm.name,
             enrollmentFee: courseForm.enrollmentFee,
             paymentType: courseForm.paymentType,
             monthlyFee: courseForm.paymentType === 'monthly' ? courseForm.monthlyFee : 0,
+            examFees: courseForm.examFees || [],
+            // Preserve payment plans, they are not editable in this simplified UI
+            paymentPlans: editingCourse.paymentPlans,
         };
         await updateCourse(coursePayload);
         toast({ title: "Success", description: "Course updated successfully." });
       } else {
-        // Create a new simple course
         const coursePayload: Omit<Course, 'id'> = {
             ...courseForm,
             monthlyFee: courseForm.paymentType === 'monthly' ? courseForm.monthlyFee : 0,
-            paymentPlans: [],
-            examFees: [],
+            paymentPlans: [], // New courses from UI are simple, no complex plans
+            examFees: courseForm.examFees || [],
         }
         await addCourse(coursePayload);
         toast({ title: "Success", description: "Course added successfully." });
@@ -104,6 +127,7 @@ export default function CoursesPage() {
         enrollmentFee: course.enrollmentFee,
         monthlyFee: course.monthlyFee,
         paymentType: course.paymentType,
+        examFees: course.examFees || [],
     });
     setIsDialogOpen(true);
   };
@@ -248,11 +272,42 @@ export default function CoursesPage() {
                 ) : (
                 <div className="space-y-2 p-3 bg-muted rounded-md">
                     <p className="text-sm text-muted-foreground">
-                        Installment plans and exam fees for existing courses are managed in the database. 
-                        New installment-based courses must be added directly to the code for now.
+                        Installment plans for existing courses are pre-defined. 
+                        New installment-based courses must be added directly to the database.
                     </p>
                 </div>
                 )}
+            
+             <div className="space-y-4 rounded-md border p-4">
+                <Label className="text-base font-medium">Exam Fees</Label>
+                <p className="text-sm text-muted-foreground">Add any exam fees associated with this course.</p>
+                
+                <div className="flex gap-2 items-end">
+                    <div className="flex-1 space-y-1">
+                        <Label htmlFor="examFeeName" className="text-xs">Fee Name</Label>
+                        <Input id="examFeeName" value={newExamFee.name} onChange={(e) => setNewExamFee({...newExamFee, name: e.target.value})} placeholder="e.g., Final Exam" />
+                    </div>
+                    <div className="w-32 space-y-1">
+                        <Label htmlFor="examFeeAmount" className="text-xs">Amount (₹)</Label>
+                        <Input id="examFeeAmount" type="number" value={newExamFee.amount} onChange={(e) => setNewExamFee({...newExamFee, amount: e.target.value})} placeholder="e.g., 500" />
+                    </div>
+                    <Button type="button" onClick={handleAddExamFee} size="sm">Add</Button>
+                </div>
+
+                <div className="space-y-2">
+                    {(courseForm.examFees || []).map((fee, index) => (
+                        <div key={index} className="flex justify-between items-center rounded-md bg-muted p-2 text-sm">
+                            <p className="font-medium">{fee.name} - ₹{fee.amount.toLocaleString()}</p>
+                            <Button type="button" variant="ghost" size="icon" onClick={() => handleRemoveExamFee(index)} className="h-6 w-6">
+                                <Trash2 className="h-4 w-4" />
+                            </Button>
+                        </div>
+                    ))}
+                    {(courseForm.examFees || []).length === 0 && (
+                        <p className="text-xs text-center text-muted-foreground py-2">No exam fees added.</p>
+                    )}
+                </div>
+            </div>
 
             <DialogFooter className="pt-4">
               <DialogClose asChild>

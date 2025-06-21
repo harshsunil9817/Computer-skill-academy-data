@@ -25,7 +25,7 @@ interface AppContextType {
   updateCourse: (course: Course) => Promise<void>;
   deleteCourse: (courseId: string) => Promise<void>;
   addStudent: (student: StudentFormData) => Promise<void>;
-  updateStudent: (studentId: string, studentData: Partial<StudentFormData> & { photoToBeRemoved?: boolean }) => Promise<void>;
+  updateStudent: (studentId: string, studentData: Partial<StudentFormData> & { photoToBeRemoved?: boolean, status?: string }) => Promise<void>;
   addPayment: (studentId: string, payment: Omit<PaymentRecord, 'id'>) => Promise<void>;
   deleteStudent: (studentId: string) => Promise<void>;
   addCustomFee: (studentId: string, fee: Omit<CustomFee, 'id' | 'dateCreated' | 'status'> & { status: 'paid' | 'due'}) => Promise<void>;
@@ -89,7 +89,7 @@ const PREDEFINED_COURSES: Omit<Course, 'id'>[] = [
     { name: "SQL", enrollmentFee: 0, paymentType: 'installment', monthlyFee: 0, paymentPlans: [{name: "One-Time", totalAmount: 2500, installments: [2500]}, {name: "Two Installments", totalAmount: 2700, installments: [1350, 1350]}, {name: "Three Installments", totalAmount: 2700, installments: [900, 900, 900]}], examFees: [] },
     { name: "ADCA", enrollmentFee: 550, paymentType: 'monthly', monthlyFee: 500, paymentPlans: [], examFees: [{name: "Exam Fee", amount: 300}] },
     { name: "ADFA", enrollmentFee: 550, paymentType: 'monthly', monthlyFee: 500, paymentPlans: [], examFees: [{name: "Exam Fee", amount: 300}] },
-    { name: "O Level", enrollmentFee: 1250, paymentType: 'monthly', monthlyFee: 500, paymentPlans: [], examFees: [{name: "M1", amount: 1250}, {name: "M2", amount: 1250}, {name: "M3", amount: 1250}, {name: "M4", amount: 1250}, {name: "Practical", amount: 900}] },
+    { name: "O Level", enrollmentFee: 1250, paymentType: 'monthly', monthlyFee: 500, paymentPlans: [], examFees: [{name: "M1 Exam Fee", amount: 1250}, {name: "M2 Exam Fee", amount: 1250}, {name: "M3 Exam Fee", amount: 1250}, {name: "M4 Exam Fee", amount: 1250}, {name: "Practical Exam Fee", amount: 900}] },
 ];
 
 
@@ -208,7 +208,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setStudents((prev) => [...prev, mapDocToStudent({ ...newStudentPayload, id: docRef.id })]);
   };
 
-  const updateStudent = async (studentId: string, updateData: Partial<StudentFormData> & { photoToBeRemoved?: boolean }) => {
+  const updateStudent = async (studentId: string, updateData: Partial<StudentFormData> & { photoToBeRemoved?: boolean, status?: string }) => {
     if (!db) throw new Error("Database not available.");
     const studentDocRef = doc(db, 'students', studentId);
     const currentStudent = students.find(s => s.id === studentId);
@@ -216,10 +216,36 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
     let finalPhotoUrl: string | null | undefined = currentStudent.photoUrl;
 
-    if (updateData.photoFile || updateData.photoDataUri) {
-        // ... (photo upload logic as before, omitted for brevity)
+    if (updateData.photoFile) {
+        const fileToUpload = updateData.photoFile;
+        // Delete old photo if it exists
+        if (currentStudent.photoUrl) {
+            const oldFileId = getAppwriteFileIdFromUrl(currentStudent.photoUrl);
+            if (oldFileId) {
+                try { await appwriteStorage.deleteFile(APPWRITE_STUDENT_PHOTOS_BUCKET_ID, oldFileId); }
+                catch (e) { console.warn("Old photo deletion failed (might be already deleted):", e); }
+            }
+        }
+        const fileUploadResponse = await appwriteStorage.createFile(APPWRITE_STUDENT_PHOTOS_BUCKET_ID, AppwriteID.unique(), fileToUpload);
+        finalPhotoUrl = appwriteStorage.getFileView(APPWRITE_STUDENT_PHOTOS_BUCKET_ID, fileUploadResponse.$id).href;
+    } else if (updateData.photoDataUri) {
+        if (currentStudent.photoUrl) {
+            const oldFileId = getAppwriteFileIdFromUrl(currentStudent.photoUrl);
+            if (oldFileId) {
+                try { await appwriteStorage.deleteFile(APPWRITE_STUDENT_PHOTOS_BUCKET_ID, oldFileId); }
+                catch (e) { console.warn("Old photo deletion failed:", e); }
+            }
+        }
+        const fileToUpload = dataURItoFile(updateData.photoDataUri, `student_photo_${Date.now()}.png`);
+        const fileUploadResponse = await appwriteStorage.createFile(APPWRITE_STUDENT_PHOTOS_BUCKET_ID, AppwriteID.unique(), fileToUpload);
+        finalPhotoUrl = appwriteStorage.getFileView(APPWRITE_STUDENT_PHOTOS_BUCKET_ID, fileUploadResponse.$id).href;
     } else if (updateData.photoToBeRemoved && currentStudent.photoUrl) {
-        // ... (photo deletion logic as before, omitted for brevity)
+        const fileIdToDelete = getAppwriteFileIdFromUrl(currentStudent.photoUrl);
+        if (fileIdToDelete) {
+             try { await appwriteStorage.deleteFile(APPWRITE_STUDENT_PHOTOS_BUCKET_ID, fileIdToDelete); }
+             catch (e) { console.warn("Photo deletion failed:", e); }
+        }
+        finalPhotoUrl = null;
     }
 
     const { photoFile, photoDataUri, photoToBeRemoved, enrollmentDate, dob, ...restOfUpdateData } = updateData;
@@ -232,11 +258,20 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     if (dob) payloadForFirestore.dob = dob;
     
     payloadForFirestore.photoUrl = finalPhotoUrl === undefined ? currentStudent.photoUrl : finalPhotoUrl;
+    if (updateData.status) payloadForFirestore.status = updateData.status;
+
     
     Object.keys(payloadForFirestore).forEach(key => payloadForFirestore[key] === undefined && delete payloadForFirestore[key]);
 
     await updateDoc(studentDocRef, payloadForFirestore);
-    setStudents((prev) => prev.map(s => s.id === studentId ? mapDocToStudent({ ...s, ...payloadForFirestore, enrollmentDate: payloadForFirestore.enrollmentDate || s.enrollmentDate }) : s));
+
+    // Create a representative object for local state update
+    const updatedLocalStudentData = { ...currentStudent, ...payloadForFirestore };
+    if(payloadForFirestore.enrollmentDate) {
+        updatedLocalStudentData.enrollmentDate = payloadForFirestore.enrollmentDate.toDate().toISOString();
+    }
+
+    setStudents((prev) => prev.map(s => s.id === studentId ? mapDocToStudent(updatedLocalStudentData) : s));
   };
   
   const addPayment = async (studentId: string, paymentData: Omit<PaymentRecord, 'id'>) => {
@@ -326,14 +361,32 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     const studentDocRef = doc(db, 'students', studentId);
     const studentToDelete = students.find(s => s.id === studentId);
     if (studentToDelete?.photoUrl) {
-      // ... (photo deletion logic)
+      const fileIdToDelete = getAppwriteFileIdFromUrl(studentToDelete.photoUrl);
+      if(fileIdToDelete) {
+         try { await appwriteStorage.deleteFile(APPWRITE_STUDENT_PHOTOS_BUCKET_ID, fileIdToDelete); }
+         catch(e) { console.warn("Could not delete student photo from Appwrite, it might have been already deleted.", e)}
+      }
     }
     await deleteDoc(studentDocRef);
     setStudents(prev => prev.filter(s => s.id !== studentId));
   };
 
   const clearAllPaymentHistories = async () => {
-    // ... (logic needs updating for new fee structures, simplified for now)
+    if (!db) throw new Error("Database not available.");
+    const batch = writeBatch(db);
+    students.forEach(student => {
+        const studentRef = doc(db, 'students', student.id);
+        batch.update(studentRef, {
+            paymentHistory: [],
+            customFees: (student.customFees || []).map(fee => ({...fee, status: 'due', datePaid: null})),
+            status: 'enrollment_pending'
+        });
+    });
+    await batch.commit();
+    // Refetch all data to ensure UI is consistent
+    const studentSnapshot = await getDocs(collection(db, 'students'));
+    const existingStudents = studentSnapshot.docs.map(doc => mapDocToStudent({ ...doc.data(), id: doc.id }));
+    setStudents(existingStudents);
   };
 
   return (
