@@ -59,14 +59,13 @@ export default function DashboardPage() {
     }
 
     if (students.length > 0 && courses.length > 0) {
-      console.log("Dashboard: Starting stats recalculation...");
-
       const courseMap = new Map<string, Course>();
       courses.forEach(course => courseMap.set(course.id, course));
 
       const currentDate = new Date();
-      const currentMonthStart = startOfMonth(currentDate);
-      
+      const currentMonth = getMonth(currentDate);
+      const currentYearNum = getYear(currentDate);
+
       let activeStudentsCount = 0;
       let newRegistrationsThisMonthCount = 0;
       let feesDueThisMonthAgg = 0;
@@ -74,92 +73,63 @@ export default function DashboardPage() {
       let totalDuesAllTimeAgg = 0;
 
       students.forEach(student => {
-        const enrollmentDate = parseISO(student.enrollmentDate);
         const course = courseMap.get(student.courseId);
+        
+        // Accumulate total revenue from all payments
+        totalRevenueAgg += student.paymentHistory.reduce((sum, p) => sum + p.amount, 0);
 
+        // Count active students
         if (student.status === 'active' || student.status === 'enrollment_pending') {
           activeStudentsCount++;
         }
-
-        if (getMonth(enrollmentDate) === getMonth(currentDate) && getYear(enrollmentDate) === getYear(currentDate)) {
+        
+        // Count new registrations this month
+        const enrollmentDate = parseISO(student.enrollmentDate);
+        if (getMonth(enrollmentDate) === currentMonth && getYear(enrollmentDate) === currentYearNum) {
           newRegistrationsThisMonthCount++;
         }
-        
-        totalRevenueAgg += student.paymentHistory.reduce((sum, p) => sum + p.amount, 0);
 
+        // Skip fee calculations if student has no course assigned
         if (!course) return;
 
-        // Calculate Total Dues All Time for this student
-        let studentOutstandingDues = 0;
-        
-        // 1. Enrollment Fee Due
-        const enrollmentPaid = student.paymentHistory.filter(p => p.type === 'enrollment').reduce((sum,p) => sum+p.amount, 0);
-        studentOutstandingDues += Math.max(0, course.enrollmentFee - enrollmentPaid);
+        // --- Calculate Total Dues All Time for this student ---
+        let totalBilled = 0;
+        const totalPaid = student.paymentHistory.reduce((sum, p) => sum + p.amount, 0);
 
-        // 2. Monthly Fee Dues
+        // 1. Enrollment Fee
+        totalBilled += course.enrollmentFee;
+
+        // 2. Exam Fees
+        totalBilled += (course.examFees || []).reduce((sum, fee) => sum + fee.amount, 0);
+        
+        // 3. Custom Fees added to the student
+        totalBilled += (student.customFees || []).reduce((sum, fee) => sum + fee.amount, 0);
+
+        // 4. Course Fees (either monthly or installment based)
         if (course.paymentType === 'monthly') {
-            const firstBillableMonth = addMonths(startOfMonth(enrollmentDate), 1);
+            const startDate = startOfMonth(enrollmentDate);
+            const endDate = new Date();
+            // Calculate the number of full months passed, including the current one.
+            const monthsDifference = (endDate.getFullYear() - startDate.getFullYear()) * 12 + (endDate.getMonth() - startDate.getMonth());
             const courseDurationInMonths = student.courseDurationValue * (student.courseDurationUnit === 'years' ? 12 : 1);
-            const lastBillableMonth = addMonths(firstBillableMonth, courseDurationInMonths - 1);
             
-            let monthToProcess = firstBillableMonth;
-            while(isBefore(monthToProcess, addMonths(currentMonthStart, 1)) && isBefore(monthToProcess, addMonths(lastBillableMonth, 1))) {
-                const monthYearStr = format(monthToProcess, "MMMM yyyy");
-                const paymentsForThisMonth = student.paymentHistory
-                    .filter(p => p.type === 'monthly' && p.referenceId === monthYearStr)
-                    .reduce((sum, p) => sum + p.amount, 0);
-                studentOutstandingDues += Math.max(0, course.monthlyFee - paymentsForThisMonth);
-                monthToProcess = addMonths(monthToProcess, 1);
-            }
-        }
-
-        // 3. Installment Dues
-        if (course.paymentType === 'installment' && student.selectedPaymentPlanName) {
-            const plan = course.paymentPlans.find(p => p.name === student.selectedPaymentPlanName);
+            // Number of months to bill is the lesser of months passed or total course duration
+            const numberOfBillableMonths = Math.min(Math.max(0, monthsDifference + 1), courseDurationInMonths);
+            totalBilled += numberOfBillableMonths * course.monthlyFee;
+            
+        } else if (course.paymentType === 'installment' && student.selectedPaymentPlanName) {
+            const plan = (course.paymentPlans || []).find(p => p.name === student.selectedPaymentPlanName);
             if (plan) {
-                const totalInstallmentAmount = plan.installments.reduce((sum, amt) => sum + amt, 0);
-                const paidForInstallments = student.paymentHistory.filter(p => p.type === 'installment' || p.type === 'partial').reduce((sum, p) => sum + p.amount, 0);
-                studentOutstandingDues += Math.max(0, totalInstallmentAmount - paidForInstallments);
+                totalBilled += plan.totalAmount;
             }
         }
-
-        // 4. Exam Fee Dues
-        course.examFees?.forEach(fee => {
-            const paidForExam = student.paymentHistory.filter(p => p.type === 'exam' && p.referenceId === fee.name).reduce((sum, p) => sum+p.amount, 0);
-            studentOutstandingDues += Math.max(0, fee.amount - paidForExam);
-        });
-
-        // 5. Custom Fee Dues
-        student.customFees?.forEach(fee => {
-            if (fee.status === 'due') {
-                studentOutstandingDues += fee.amount;
-            }
-        });
-
-        // Subtract general partial payments from total dues
-        const partialPayments = student.paymentHistory.filter(p => p.type === 'partial').reduce((sum, p) => sum + p.amount, 0);
         
-        let allNonPartialPayments = student.paymentHistory
-            .filter(p => p.type !== 'partial')
-            .reduce((sum, p) => sum + p.amount, 0);
-
-        let totalBilled = course.enrollmentFee + (student.customFees?.reduce((sum,f) => sum+f.amount, 0) || 0) + (course.examFees?.reduce((sum,f)=> sum+f.amount,0) || 0);
-
-        if(course.paymentType === 'monthly') {
-             // ... logic to calculate total billed monthly fees
-        } else if(course.paymentType === 'installment' && student.selectedPaymentPlanName) {
-             const plan = course.paymentPlans.find(p => p.name === student.selectedPaymentPlanName);
-             if(plan) totalBilled += plan.totalAmount;
-        }
-
-        const totalPaid = student.paymentHistory.reduce((sum,p) => sum+p.amount, 0);
-
         totalDuesAllTimeAgg += Math.max(0, totalBilled - totalPaid);
       });
       
       setDashboardStats({
         activeStudents: activeStudentsCount,
-        feesDueThisMonth: feesDueThisMonthAgg, // This calculation is complex and deferred for now.
+        feesDueThisMonth: feesDueThisMonthAgg, // Calculation for this is complex and deferred
         totalRevenue: totalRevenueAgg,
         newRegistrationsThisMonth: newRegistrationsThisMonthCount,
         totalDuesAllTime: totalDuesAllTimeAgg,
