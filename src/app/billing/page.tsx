@@ -31,7 +31,7 @@ import { cn } from '@/lib/utils';
 
 
 export default function BillingPage() {
-  const { students, courses, addPayment, isLoading: isAppContextLoading, addCustomFee, updateCustomFeeStatus } from useAppContext();
+  const { students, courses, addPayment, isLoading: isAppContextLoading, addCustomFee, updateCustomFeeStatus } = useAppContext();
   const { toast } = useToast();
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -245,8 +245,8 @@ export default function BillingPage() {
           {/* Right Column - Payments & Custom Fees */}
           <Card className="lg:col-span-1 shadow-lg">
             <CardHeader>
-                <CardTitle className="flex items-center text-primary font-headline"><Banknote className="mr-2 h-5 w-5" />Actions</CardTitle>
-                 <CardDescription>Record payments or add custom fees for this student.</CardDescription>
+                <CardTitle className="flex items-center text-primary font-headline"><Banknote className="mr-2 h-5 w-5" />Record General Payment</CardTitle>
+                 <CardDescription>Record general payments for this student.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
                 {/* General Payment Section */}
@@ -299,17 +299,17 @@ export default function BillingPage() {
 function FeeDetailsTabs({student, course, onPay}: {student: Student, course: Course, onPay: Function}) {
 
     const { enrollmentDue } = useMemo(() => {
-        const paid = student.paymentHistory.filter(p => p.type === 'enrollment').reduce((sum,p) => sum+p.amount, 0);
+        const paid = (student.paymentHistory || []).filter(p => p.type === 'enrollment').reduce((sum,p) => sum+p.amount, 0);
         return { enrollmentDue: Math.max(0, course.enrollmentFee - paid) };
     }, [student, course]);
 
     const { installmentDues } = useMemo(() => {
         if(course.paymentType !== 'installment' || !student.selectedPaymentPlanName) return { installmentDues: [] };
         
-        const plan = course.paymentPlans.find(p => p.name === student.selectedPaymentPlanName);
+        const plan = (course.paymentPlans || []).find(p => p.name === student.selectedPaymentPlanName);
         if (!plan) return { installmentDues: [] };
 
-        const payments = student.paymentHistory.filter(p => p.type === 'installment' || p.type === 'partial');
+        const payments = (student.paymentHistory || []).filter(p => p.type === 'installment' || p.type === 'partial');
 
         let totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
 
@@ -331,18 +331,18 @@ function FeeDetailsTabs({student, course, onPay}: {student: Student, course: Cou
         if(course.paymentType !== 'monthly') return { monthlyDues: [] };
         let dues = [];
         const enrollmentDate = parseISO(student.enrollmentDate);
-        const firstBillableMonth = startOfMonth(enrollmentDate); // Bill from enrollment month itself
+        const firstBillableMonth = startOfMonth(enrollmentDate);
         const courseDurationInMonths = student.courseDurationValue * (student.courseDurationUnit === 'years' ? 12 : 1);
         
         for (let i=0; i<courseDurationInMonths; i++) {
             const monthDate = addMonths(firstBillableMonth, i);
             const monthYearStr = format(monthDate, "MMMM yyyy");
             
-            const paidForMonth = student.paymentHistory
+            const paidForMonth = (student.paymentHistory || [])
                 .filter(p => p.description === monthYearStr || (p.type==='monthly' && p.referenceId === monthYearStr))
                 .reduce((sum, p) => sum + p.amount, 0);
             
-            const partialsApplied = student.paymentHistory
+            const partialsApplied = (student.paymentHistory || [])
                 .filter(p => p.type === 'partial' && p.description === monthYearStr)
                 .reduce((sum, p) => sum + p.amount, 0);
             
@@ -359,9 +359,9 @@ function FeeDetailsTabs({student, course, onPay}: {student: Student, course: Cou
     }, [student, course]);
     
     const { examFeeDues } = useMemo(() => {
-        if(!course.examFees) return { examFeeDues: [] };
-        return { examFeeDues: course.examFees.map(fee => {
-            const paid = student.paymentHistory
+        const fees = course.examFees || [];
+        return { examFeeDues: fees.map(fee => {
+            const paid = (student.paymentHistory || [])
                 .filter(p => p.type === 'exam' && p.referenceId === fee.name)
                 .reduce((sum, p) => sum+p.amount, 0);
             return {
