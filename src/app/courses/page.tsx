@@ -16,11 +16,12 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
 import { useAppContext } from '@/lib/context/AppContext';
-import type { Course, CourseFormData, ExamFee } from '@/lib/types';
+import type { Course, CourseFormData, ExamFee, PaymentPlan } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { cn } from '@/lib/utils';
+import { Separator } from '@/components/ui/separator';
 
 const initialCourseFormState: CourseFormData = {
   name: '',
@@ -28,6 +29,7 @@ const initialCourseFormState: CourseFormData = {
   paymentType: 'monthly',
   monthlyFee: 0,
   examFees: [],
+  paymentPlans: [],
 };
 
 export default function CoursesPage() {
@@ -35,8 +37,15 @@ export default function CoursesPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [courseForm, setCourseForm] = useState<CourseFormData>(initialCourseFormState);
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
+  
+  // State for exam fees
   const [newExamFee, setNewExamFee] = useState({ name: '', amount: '' });
   const [editingExamFeeIndex, setEditingExamFeeIndex] = useState<number | null>(null);
+  
+  // State for installment plans
+  const [newPaymentPlan, setNewPaymentPlan] = useState({ name: '', installments: '' });
+  const [editingPaymentPlanIndex, setEditingPaymentPlanIndex] = useState<number | null>(null);
+
   const { toast } = useToast();
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -48,11 +57,11 @@ export default function CoursesPage() {
     }));
   };
 
+  // --- Exam Fee Management ---
   const handleSaveExamFee = () => {
     const amount = parseFloat(newExamFee.amount);
     if (newExamFee.name && !isNaN(amount) && amount > 0) {
       if (editingExamFeeIndex !== null) {
-        // Update existing fee
         setCourseForm(prev => {
           const updatedFees = [...(prev.examFees || [])];
           updatedFees[editingExamFeeIndex] = { name: newExamFee.name, amount };
@@ -61,7 +70,6 @@ export default function CoursesPage() {
         setEditingExamFeeIndex(null);
         toast({ title: "Success", description: "Exam fee updated." });
       } else {
-        // Add new fee
         setCourseForm(prev => ({
           ...prev,
           examFees: [...(prev.examFees || []), { name: newExamFee.name, amount }]
@@ -89,7 +97,7 @@ export default function CoursesPage() {
 
   const handleRemoveExamFee = (index: number) => {
     if (editingExamFeeIndex === index) {
-      handleCancelEditExamFee(); // Reset form if deleting the item being edited
+      handleCancelEditExamFee();
     }
     setCourseForm(prev => ({
       ...prev,
@@ -97,6 +105,60 @@ export default function CoursesPage() {
     }));
     toast({ title: "Fee Removed", description: "The exam fee has been removed." });
   };
+
+  // --- Payment Plan Management ---
+  const handleSavePaymentPlan = () => {
+    const installments = newPaymentPlan.installments.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n) && n > 0);
+    if (!newPaymentPlan.name || installments.length === 0) {
+        toast({ title: "Error", description: "Please enter a valid plan name and at least one installment amount.", variant: "destructive" });
+        return;
+    }
+
+    const totalAmount = installments.reduce((sum, current) => sum + current, 0);
+    const plan: PaymentPlan = { name: newPaymentPlan.name, installments, totalAmount };
+
+    if (editingPaymentPlanIndex !== null) {
+        setCourseForm(prev => {
+            const updatedPlans = [...prev.paymentPlans];
+            updatedPlans[editingPaymentPlanIndex] = plan;
+            return { ...prev, paymentPlans: updatedPlans };
+        });
+        toast({ title: "Success", description: "Payment plan updated." });
+    } else {
+        setCourseForm(prev => ({
+            ...prev,
+            paymentPlans: [...(prev.paymentPlans || []), plan]
+        }));
+        toast({ title: "Success", description: "Payment plan added." });
+    }
+    setNewPaymentPlan({ name: '', installments: '' });
+    setEditingPaymentPlanIndex(null);
+  };
+
+  const handleEditPaymentPlan = (index: number) => {
+      const planToEdit = (courseForm.paymentPlans || [])[index];
+      if(planToEdit) {
+        setEditingPaymentPlanIndex(index);
+        setNewPaymentPlan({ name: planToEdit.name, installments: planToEdit.installments.join(', ') });
+      }
+  };
+  
+  const handleCancelEditPaymentPlan = () => {
+    setEditingPaymentPlanIndex(null);
+    setNewPaymentPlan({ name: '', installments: '' });
+  };
+
+  const handleRemovePaymentPlan = (index: number) => {
+    if (editingPaymentPlanIndex === index) {
+      handleCancelEditPaymentPlan();
+    }
+    setCourseForm(prev => ({
+      ...prev,
+      paymentPlans: (prev.paymentPlans || []).filter((_, i) => i !== index)
+    }));
+    toast({ title: "Plan Removed", description: "The payment plan has been removed." });
+  };
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -110,6 +172,10 @@ export default function CoursesPage() {
         toast({ title: "Error", description: "Monthly fee must be positive for monthly courses.", variant: "destructive" });
         return;
     }
+     if (courseForm.paymentType === 'installment' && (courseForm.paymentPlans || []).length === 0) {
+        toast({ title: "Error", description: "Please add at least one payment plan for an installment-based course.", variant: "destructive" });
+        return;
+    }
     
     try {
       if (editingCourse) {
@@ -120,7 +186,7 @@ export default function CoursesPage() {
             paymentType: courseForm.paymentType,
             monthlyFee: courseForm.paymentType === 'monthly' ? courseForm.monthlyFee : 0,
             examFees: courseForm.examFees || [],
-            paymentPlans: editingCourse.paymentPlans,
+            paymentPlans: courseForm.paymentType === 'installment' ? (courseForm.paymentPlans || []) : [],
         };
         await updateCourse(coursePayload);
         toast({ title: "Success", description: "Course updated successfully." });
@@ -128,7 +194,7 @@ export default function CoursesPage() {
         const coursePayload: Omit<Course, 'id'> = {
             ...courseForm,
             monthlyFee: courseForm.paymentType === 'monthly' ? courseForm.monthlyFee : 0,
-            paymentPlans: [],
+            paymentPlans: courseForm.paymentType === 'installment' ? (courseForm.paymentPlans || []) : [],
             examFees: courseForm.examFees || [],
         }
         await addCourse(coursePayload);
@@ -149,6 +215,7 @@ export default function CoursesPage() {
     setEditingCourse(null);
     setCourseForm(initialCourseFormState);
     handleCancelEditExamFee();
+    handleCancelEditPaymentPlan();
     setIsDialogOpen(true);
   };
 
@@ -160,8 +227,10 @@ export default function CoursesPage() {
         monthlyFee: course.monthlyFee,
         paymentType: course.paymentType,
         examFees: course.examFees || [],
+        paymentPlans: course.paymentPlans || [],
     });
     handleCancelEditExamFee();
+    handleCancelEditPaymentPlan();
     setIsDialogOpen(true);
   };
 
@@ -278,49 +347,77 @@ export default function CoursesPage() {
                 <Label htmlFor="enrollmentFee">Enrollment Fee (₹)</Label>
                 <Input id="enrollmentFee" name="enrollmentFee" type="number" value={courseForm.enrollmentFee} onChange={handleInputChange} placeholder="e.g., 500" />
               </div>
+              <div className="space-y-2">
+                  <Label>Payment Type</Label>
+                  <RadioGroup
+                      name="paymentType"
+                      value={courseForm.paymentType}
+                      onValueChange={(value: 'monthly' | 'installment') => setCourseForm(prev => ({ ...prev, paymentType: value }))}
+                      className="flex gap-4"
+                      disabled={!!editingCourse}
+                  >
+                      <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="monthly" id="r1" />
+                          <Label htmlFor="r1">Monthly Fees</Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="installment" id="r2" />
+                          <Label htmlFor="r2">Installment Plan</Label>
+                      </div>
+                  </RadioGroup>
+                  {editingCourse && <p className="text-xs text-muted-foreground">Payment type cannot be changed for an existing course.</p>}
+              </div>
 
-              {editingCourse ? (
-                  <div className="space-y-2">
-                      <Label>Payment Type</Label>
-                      <Input 
-                          value={editingCourse.paymentType} 
-                          disabled 
-                          className="capitalize"
-                      />
-                  </div>
-              ) : (
-                  <div className="space-y-2">
-                      <Label>Payment Type</Label>
-                      <RadioGroup
-                          name="paymentType"
-                          value={courseForm.paymentType}
-                          onValueChange={(value: 'monthly' | 'installment') => setCourseForm(prev => ({ ...prev, paymentType: value }))}
-                          className="flex gap-4"
-                      >
-                          <div className="flex items-center space-x-2">
-                              <RadioGroupItem value="monthly" id="r1" />
-                              <Label htmlFor="r1">Monthly Fees</Label>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                              <RadioGroupItem value="installment" id="r2" />
-                              <Label htmlFor="r2">Installment Plan</Label>
-                          </div>
-                      </RadioGroup>
-                  </div>
-              )}
-
-              {courseForm.paymentType === 'monthly' ? (
+              {courseForm.paymentType === 'monthly' && (
                 <div className="space-y-2">
                     <Label htmlFor="monthlyFee">Monthly Fee (₹)</Label>
                     <Input id="monthlyFee" name="monthlyFee" type="number" value={courseForm.monthlyFee} onChange={handleInputChange} placeholder="e.g., 500" />
                 </div>
-                ) : (
-                <div className="space-y-2 p-3 bg-muted rounded-md">
-                    <p className="text-sm text-muted-foreground">
-                        Installment plans are pre-defined in the application code and cannot be edited from this interface.
-                    </p>
+              )}
+            
+            {courseForm.paymentType === 'installment' && (
+                 <div className="space-y-4 rounded-md border p-4">
+                    <Label className="text-base font-medium">Installment Plans</Label>
+                    <p className="text-sm text-muted-foreground">Add or edit installment plans for this course.</p>
+                    
+                    <div className="flex gap-2 items-end">
+                        <div className="flex-1 space-y-1">
+                            <Label htmlFor="planName" className="text-xs">Plan Name</Label>
+                            <Input id="planName" value={newPaymentPlan.name} onChange={(e) => setNewPaymentPlan({...newPaymentPlan, name: e.target.value})} placeholder="e.g., Two Installments" />
+                        </div>
+                        <div className="flex-1 space-y-1">
+                            <Label htmlFor="installments" className="text-xs">Installments (₹, comma-separated)</Label>
+                            <Input id="installments" value={newPaymentPlan.installments} onChange={(e) => setNewPaymentPlan({...newPaymentPlan, installments: e.target.value})} placeholder="e.g., 1500, 1500" />
+                        </div>
+                        <Button type="button" onClick={handleSavePaymentPlan} size="sm">{editingPaymentPlanIndex !== null ? 'Update' : 'Add'}</Button>
+                        {editingPaymentPlanIndex !== null && (
+                            <Button type="button" variant="ghost" onClick={handleCancelEditPaymentPlan} size="sm">Cancel</Button>
+                        )}
+                    </div>
+                    <Separator />
+                    <div className="space-y-2">
+                        {(courseForm.paymentPlans || []).map((plan, index) => (
+                            <div key={index} className={cn("flex justify-between items-center rounded-md bg-muted p-2 text-sm", {'ring-2 ring-primary': editingPaymentPlanIndex === index})}>
+                                <div>
+                                  <p className="font-medium">{plan.name} - ₹{plan.totalAmount.toLocaleString()}</p>
+                                  <p className="text-xs text-muted-foreground">({plan.installments.join(', ')})</p>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                    <Button type="button" variant="ghost" size="icon" onClick={() => handleEditPaymentPlan(index)} className="h-6 w-6" disabled={editingPaymentPlanIndex === index}>
+                                        <Edit className="h-4 w-4" />
+                                    </Button>
+                                    <Button type="button" variant="ghost" size="icon" onClick={() => handleRemovePaymentPlan(index)} className="h-6 w-6">
+                                        <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                </div>
+                            </div>
+                        ))}
+                        {(courseForm.paymentPlans || []).length === 0 && (
+                            <p className="text-xs text-center text-muted-foreground py-2">No installment plans added.</p>
+                        )}
+                    </div>
                 </div>
-                )}
+            )}
             
             <div className="space-y-4 rounded-md border p-4">
                 <Label className="text-base font-medium">Exam Fees</Label>
@@ -340,7 +437,7 @@ export default function CoursesPage() {
                          <Button type="button" variant="ghost" onClick={handleCancelEditExamFee} size="sm">Cancel</Button>
                     )}
                 </div>
-
+                 <Separator />
                 <div className="space-y-2">
                     {(courseForm.examFees || []).map((fee, index) => (
                         <div key={index} className={cn("flex justify-between items-center rounded-md bg-muted p-2 text-sm", {'ring-2 ring-primary': editingExamFeeIndex === index})}>
@@ -374,5 +471,3 @@ export default function CoursesPage() {
     </>
   );
 }
-
-    
