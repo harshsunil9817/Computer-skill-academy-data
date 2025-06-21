@@ -278,24 +278,36 @@ export default function CoursesPage() {
                 <Label htmlFor="enrollmentFee">Enrollment Fee (₹)</Label>
                 <Input id="enrollmentFee" name="enrollmentFee" type="number" value={courseForm.enrollmentFee} onChange={handleInputChange} placeholder="e.g., 500" />
               </div>
-              <div className="space-y-2">
-                <Label>Payment Type</Label>
-                <RadioGroup
-                    name="paymentType"
-                    value={courseForm.paymentType}
-                    onValueChange={(value: 'monthly' | 'installment') => setCourseForm(prev => ({ ...prev, paymentType: value }))}
-                    className="flex gap-4"
-                >
-                    <div className="flex items-center space-x-2">
-                        <RadioGroupItem value="monthly" id="r1" />
-                        <Label htmlFor="r1">Monthly Fees</Label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                        <RadioGroupItem value="installment" id="r2" disabled={!editingCourse} />
-                        <Label htmlFor="r2">Installment Plan</Label>
-                    </div>
-                </RadioGroup>
-              </div>
+
+              {editingCourse ? (
+                  <div className="space-y-2">
+                      <Label>Payment Type</Label>
+                      <Input 
+                          value={editingCourse.paymentType} 
+                          disabled 
+                          className="capitalize"
+                      />
+                  </div>
+              ) : (
+                  <div className="space-y-2">
+                      <Label>Payment Type</Label>
+                      <RadioGroup
+                          name="paymentType"
+                          value={courseForm.paymentType}
+                          onValueChange={(value: 'monthly' | 'installment') => setCourseForm(prev => ({ ...prev, paymentType: value }))}
+                          className="flex gap-4"
+                      >
+                          <div className="flex items-center space-x-2">
+                              <RadioGroupItem value="monthly" id="r1" />
+                              <Label htmlFor="r1">Monthly Fees</Label>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                              <RadioGroupItem value="installment" id="r2" />
+                              <Label htmlFor="r2">Installment Plan</Label>
+                          </div>
+                      </RadioGroup>
+                  </div>
+              )}
 
               {courseForm.paymentType === 'monthly' ? (
                 <div className="space-y-2">
@@ -305,7 +317,7 @@ export default function CoursesPage() {
                 ) : (
                 <div className="space-y-2 p-3 bg-muted rounded-md">
                     <p className="text-sm text-muted-foreground">
-                        Installment plans for existing courses are pre-defined. New plans must be added directly to the database.
+                        Installment plans are pre-defined in the application code and cannot be edited from this interface.
                     </p>
                 </div>
                 )}
