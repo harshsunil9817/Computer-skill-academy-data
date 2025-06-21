@@ -20,6 +20,7 @@ import type { Course, CourseFormData, ExamFee } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { cn } from '@/lib/utils';
 
 const initialCourseFormState: CourseFormData = {
   name: '',
@@ -35,6 +36,7 @@ export default function CoursesPage() {
   const [courseForm, setCourseForm] = useState<CourseFormData>(initialCourseFormState);
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
   const [newExamFee, setNewExamFee] = useState({ name: '', amount: '' });
+  const [editingExamFeeIndex, setEditingExamFeeIndex] = useState<number | null>(null);
   const { toast } = useToast();
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -46,24 +48,54 @@ export default function CoursesPage() {
     }));
   };
 
-  const handleAddExamFee = () => {
+  const handleSaveExamFee = () => {
     const amount = parseFloat(newExamFee.amount);
     if (newExamFee.name && !isNaN(amount) && amount > 0) {
+      if (editingExamFeeIndex !== null) {
+        // Update existing fee
+        setCourseForm(prev => {
+          const updatedFees = [...(prev.examFees || [])];
+          updatedFees[editingExamFeeIndex] = { name: newExamFee.name, amount };
+          return { ...prev, examFees: updatedFees };
+        });
+        setEditingExamFeeIndex(null);
+        toast({ title: "Success", description: "Exam fee updated." });
+      } else {
+        // Add new fee
         setCourseForm(prev => ({
-            ...prev,
-            examFees: [...(prev.examFees || []), { name: newExamFee.name, amount }]
+          ...prev,
+          examFees: [...(prev.examFees || []), { name: newExamFee.name, amount }]
         }));
-        setNewExamFee({ name: '', amount: '' }); // Reset form
+        toast({ title: "Success", description: "Exam fee added." });
+      }
+      setNewExamFee({ name: '', amount: '' }); // Reset form
     } else {
-        toast({ title: "Error", description: "Please enter a valid fee name and a positive amount.", variant: "destructive" });
+      toast({ title: "Error", description: "Please enter a valid fee name and a positive amount.", variant: "destructive" });
     }
   };
 
+  const handleEditExamFee = (index: number) => {
+    const feeToEdit = (courseForm.examFees || [])[index];
+    if (feeToEdit) {
+      setEditingExamFeeIndex(index);
+      setNewExamFee({ name: feeToEdit.name, amount: String(feeToEdit.amount) });
+    }
+  };
+  
+  const handleCancelEditExamFee = () => {
+    setEditingExamFeeIndex(null);
+    setNewExamFee({ name: '', amount: '' });
+  };
+
   const handleRemoveExamFee = (index: number) => {
-      setCourseForm(prev => ({
-          ...prev,
-          examFees: (prev.examFees || []).filter((_, i) => i !== index)
-      }));
+    if (editingExamFeeIndex === index) {
+      handleCancelEditExamFee(); // Reset form if deleting the item being edited
+    }
+    setCourseForm(prev => ({
+      ...prev,
+      examFees: (prev.examFees || []).filter((_, i) => i !== index)
+    }));
+    toast({ title: "Fee Removed", description: "The exam fee has been removed." });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -88,7 +120,6 @@ export default function CoursesPage() {
             paymentType: courseForm.paymentType,
             monthlyFee: courseForm.paymentType === 'monthly' ? courseForm.monthlyFee : 0,
             examFees: courseForm.examFees || [],
-            // Preserve payment plans, they are not editable in this simplified UI
             paymentPlans: editingCourse.paymentPlans,
         };
         await updateCourse(coursePayload);
@@ -97,7 +128,7 @@ export default function CoursesPage() {
         const coursePayload: Omit<Course, 'id'> = {
             ...courseForm,
             monthlyFee: courseForm.paymentType === 'monthly' ? courseForm.monthlyFee : 0,
-            paymentPlans: [], // New courses from UI are simple, no complex plans
+            paymentPlans: [],
             examFees: courseForm.examFees || [],
         }
         await addCourse(coursePayload);
@@ -117,6 +148,7 @@ export default function CoursesPage() {
   const openAddDialog = () => {
     setEditingCourse(null);
     setCourseForm(initialCourseFormState);
+    handleCancelEditExamFee();
     setIsDialogOpen(true);
   };
 
@@ -129,6 +161,7 @@ export default function CoursesPage() {
         paymentType: course.paymentType,
         examFees: course.examFees || [],
     });
+    handleCancelEditExamFee();
     setIsDialogOpen(true);
   };
 
@@ -258,7 +291,7 @@ export default function CoursesPage() {
                         <Label htmlFor="r1">Monthly Fees</Label>
                     </div>
                     <div className="flex items-center space-x-2">
-                        <RadioGroupItem value="installment" id="r2" />
+                        <RadioGroupItem value="installment" id="r2" disabled={!editingCourse} />
                         <Label htmlFor="r2">Installment Plan</Label>
                     </div>
                 </RadioGroup>
@@ -272,15 +305,14 @@ export default function CoursesPage() {
                 ) : (
                 <div className="space-y-2 p-3 bg-muted rounded-md">
                     <p className="text-sm text-muted-foreground">
-                        Installment plans for existing courses are pre-defined. 
-                        New installment-based courses must be added directly to the database.
+                        Installment plans for existing courses are pre-defined. New plans must be added directly to the database.
                     </p>
                 </div>
                 )}
             
-             <div className="space-y-4 rounded-md border p-4">
+            <div className="space-y-4 rounded-md border p-4">
                 <Label className="text-base font-medium">Exam Fees</Label>
-                <p className="text-sm text-muted-foreground">Add any exam fees associated with this course.</p>
+                <p className="text-sm text-muted-foreground">Add or edit exam fees for this course.</p>
                 
                 <div className="flex gap-2 items-end">
                     <div className="flex-1 space-y-1">
@@ -291,16 +323,24 @@ export default function CoursesPage() {
                         <Label htmlFor="examFeeAmount" className="text-xs">Amount (₹)</Label>
                         <Input id="examFeeAmount" type="number" value={newExamFee.amount} onChange={(e) => setNewExamFee({...newExamFee, amount: e.target.value})} placeholder="e.g., 500" />
                     </div>
-                    <Button type="button" onClick={handleAddExamFee} size="sm">Add</Button>
+                    <Button type="button" onClick={handleSaveExamFee} size="sm">{editingExamFeeIndex !== null ? 'Update' : 'Add'}</Button>
+                    {editingExamFeeIndex !== null && (
+                         <Button type="button" variant="ghost" onClick={handleCancelEditExamFee} size="sm">Cancel</Button>
+                    )}
                 </div>
 
                 <div className="space-y-2">
                     {(courseForm.examFees || []).map((fee, index) => (
-                        <div key={index} className="flex justify-between items-center rounded-md bg-muted p-2 text-sm">
+                        <div key={index} className={cn("flex justify-between items-center rounded-md bg-muted p-2 text-sm", {'ring-2 ring-primary': editingExamFeeIndex === index})}>
                             <p className="font-medium">{fee.name} - ₹{fee.amount.toLocaleString()}</p>
-                            <Button type="button" variant="ghost" size="icon" onClick={() => handleRemoveExamFee(index)} className="h-6 w-6">
-                                <Trash2 className="h-4 w-4" />
-                            </Button>
+                            <div className="flex items-center gap-1">
+                                <Button type="button" variant="ghost" size="icon" onClick={() => handleEditExamFee(index)} className="h-6 w-6" disabled={editingExamFeeIndex === index}>
+                                    <Edit className="h-4 w-4" />
+                                </Button>
+                                <Button type="button" variant="ghost" size="icon" onClick={() => handleRemoveExamFee(index)} className="h-6 w-6">
+                                    <Trash2 className="h-4 w-4" />
+                                </Button>
+                            </div>
                         </div>
                     ))}
                     {(courseForm.examFees || []).length === 0 && (
@@ -322,3 +362,5 @@ export default function CoursesPage() {
     </>
   );
 }
+
+    
