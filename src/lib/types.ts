@@ -73,8 +73,6 @@ export interface CourseFormData {
   enrollmentFee: number;
   paymentType: 'monthly' | 'installment';
   monthlyFee: number;
-  paymentPlansJSON: string; // Using a string to simplify form
-  examFeesJSON: string; // Using a string to simplify form
 }
 
 export interface StudentFormData {

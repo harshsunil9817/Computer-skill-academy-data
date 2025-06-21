@@ -16,19 +16,16 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
 import { useAppContext } from '@/lib/context/AppContext';
-import type { Course, CourseFormData, PaymentPlan, ExamFee } from '@/lib/types';
+import type { Course, CourseFormData } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Textarea } from '@/components/ui/textarea';
 
 const initialCourseFormState: CourseFormData = {
   name: '',
   enrollmentFee: 0,
   paymentType: 'monthly',
   monthlyFee: 0,
-  paymentPlansJSON: '[]',
-  examFeesJSON: '[]',
 };
 
 export default function CoursesPage() {
@@ -38,7 +35,7 @@ export default function CoursesPage() {
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
   const { toast } = useToast();
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     const isNumericField = ['enrollmentFee', 'monthlyFee'].includes(name);
     setCourseForm((prev) => ({
@@ -50,19 +47,6 @@ export default function CoursesPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    let paymentPlans: PaymentPlan[] = [];
-    let examFees: ExamFee[] = [];
-
-    try {
-      if (courseForm.paymentType === 'installment') {
-        paymentPlans = JSON.parse(courseForm.paymentPlansJSON);
-      }
-      examFees = JSON.parse(courseForm.examFeesJSON || '[]');
-    } catch (error) {
-      toast({ title: "Error", description: "Invalid JSON format in payment plans or exam fees.", variant: "destructive" });
-      return;
-    }
-    
     if (!courseForm.name || courseForm.enrollmentFee < 0) {
       toast({ title: "Error", description: "Please fill name and enrollment fee.", variant: "destructive" });
       return;
@@ -72,21 +56,27 @@ export default function CoursesPage() {
         toast({ title: "Error", description: "Monthly fee must be positive for monthly courses.", variant: "destructive" });
         return;
     }
-
-    const coursePayload = {
-      name: courseForm.name,
-      enrollmentFee: courseForm.enrollmentFee,
-      paymentType: courseForm.paymentType,
-      monthlyFee: courseForm.paymentType === 'monthly' ? courseForm.monthlyFee : 0,
-      paymentPlans: courseForm.paymentType === 'installment' ? paymentPlans : [],
-      examFees: examFees,
-    };
-
+    
     try {
       if (editingCourse) {
-        await updateCourse({ ...editingCourse, ...coursePayload });
+        // Preserve existing complex properties when editing basic details
+        const coursePayload: Course = {
+            ...editingCourse,
+            name: courseForm.name,
+            enrollmentFee: courseForm.enrollmentFee,
+            paymentType: courseForm.paymentType,
+            monthlyFee: courseForm.paymentType === 'monthly' ? courseForm.monthlyFee : 0,
+        };
+        await updateCourse(coursePayload);
         toast({ title: "Success", description: "Course updated successfully." });
       } else {
+        // Create a new simple course
+        const coursePayload: Omit<Course, 'id'> = {
+            ...courseForm,
+            monthlyFee: courseForm.paymentType === 'monthly' ? courseForm.monthlyFee : 0,
+            paymentPlans: [],
+            examFees: [],
+        }
         await addCourse(coursePayload);
         toast({ title: "Success", description: "Course added successfully." });
       }
@@ -114,8 +104,6 @@ export default function CoursesPage() {
         enrollmentFee: course.enrollmentFee,
         monthlyFee: course.monthlyFee,
         paymentType: course.paymentType,
-        paymentPlansJSON: JSON.stringify(course.paymentPlans || [], null, 2),
-        examFeesJSON: JSON.stringify(course.examFees || [], null, 2),
     });
     setIsDialogOpen(true);
   };
@@ -258,32 +246,14 @@ export default function CoursesPage() {
                     <Input id="monthlyFee" name="monthlyFee" type="number" value={courseForm.monthlyFee} onChange={handleInputChange} placeholder="e.g., 500" />
                 </div>
                 ) : (
-                <div className="space-y-2">
-                    <Label htmlFor="paymentPlansJSON">Payment Plans (JSON format)</Label>
-                    <Textarea
-                    id="paymentPlansJSON"
-                    name="paymentPlansJSON"
-                    value={courseForm.paymentPlansJSON}
-                    onChange={handleInputChange}
-                    rows={5}
-                    placeholder='[{"name": "One-Time", "totalAmount": 2000, "installments": [2000]}]'
-                    />
-                     <p className="text-xs text-muted-foreground">Use valid JSON array format.</p>
+                <div className="space-y-2 p-3 bg-muted rounded-md">
+                    <p className="text-sm text-muted-foreground">
+                        Installment plans and exam fees for existing courses are managed in the database. 
+                        New installment-based courses must be added directly to the code for now.
+                    </p>
                 </div>
                 )}
 
-                <div className="space-y-2">
-                    <Label htmlFor="examFeesJSON">Exam Fees (JSON format, optional)</Label>
-                    <Textarea
-                    id="examFeesJSON"
-                    name="examFeesJSON"
-                    value={courseForm.examFeesJSON}
-                    onChange={handleInputChange}
-                    rows={3}
-                    placeholder='[{"name": "M1 Exam", "amount": 1250}]'
-                    />
-                    <p className="text-xs text-muted-foreground">Use valid JSON array format.</p>
-                </div>
             <DialogFooter className="pt-4">
               <DialogClose asChild>
                 <Button type="button" variant="outline" className="animate-button-click">Cancel</Button>

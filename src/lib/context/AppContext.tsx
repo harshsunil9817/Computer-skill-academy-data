@@ -78,18 +78,18 @@ const getAppwriteFileIdFromUrl = (url: string): string | null => {
     }
 };
 
-const PREDEFINED_COURSES = [
-    { id: "CCC", name: "CCC", enrollmentFee: 0, paymentType: 'installment', monthlyFee: 0, paymentPlans: [{name: "One-Time", totalAmount: 2000, installments: [2000]}, {name: "Two Installments", totalAmount: 2200, installments: [1100, 1100]}], examFees: [] },
-    { id: "Tally", name: "Tally", enrollmentFee: 0, paymentType: 'installment', monthlyFee: 0, paymentPlans: [{name: "One-Time", totalAmount: 2500, installments: [2500]}, {name: "Two Installments", totalAmount: 2600, installments: [1300, 1300]}], examFees: [] },
-    { id: "Premium Tally", name: "Premium Tally", enrollmentFee: 0, paymentType: 'installment', monthlyFee: 0, paymentPlans: [{name: "One-Time", totalAmount: 3000, installments: [3000]}, {name: "Two Installments", totalAmount: 3200, installments: [1600, 1600]}, {name: "Three Installments", totalAmount: 3600, installments: [1200, 1200, 1200]}], examFees: [] },
-    { id: "DTP", name: "Coral Draw & PhotoShop (DTP)", enrollmentFee: 0, paymentType: 'installment', monthlyFee: 0, paymentPlans: [{name: "One-Time", totalAmount: 3000, installments: [3000]}, {name: "Two Installments", totalAmount: 3200, installments: [1600, 1600]}, {name: "Three Installments", totalAmount: 3600, installments: [1200, 1200, 1200]}], examFees: [] },
-    { id: "Excel", name: "Excel", enrollmentFee: 0, paymentType: 'installment', monthlyFee: 0, paymentPlans: [{name: "One-Time", totalAmount: 2500, installments: [2500]}, {name: "Two Installments", totalAmount: 3200, installments: [1600, 1600]}, {name: "Three Installments", totalAmount: 2700, installments: [900, 900, 900]}], examFees: [] },
-    { id: "WebDev", name: "HTML, CSS, JavaScript", enrollmentFee: 0, paymentType: 'installment', monthlyFee: 0, paymentPlans: [{name: "One-Time", totalAmount: 2500, installments: [2500]}, {name: "Two Installments", totalAmount: 3200, installments: [1600, 1600]}, {name: "Three Installments", totalAmount: 2700, installments: [900, 900, 900]}], examFees: [] },
-    { id: "Python", name: "Python", enrollmentFee: 0, paymentType: 'installment', monthlyFee: 0, paymentPlans: [{name: "One-Time", totalAmount: 2500, installments: [2500]}, {name: "Two Installments", totalAmount: 3200, installments: [1600, 1600]}, {name: "Three Installments", totalAmount: 2700, installments: [900, 900, 900]}], examFees: [] },
-    { id: "SQL", name: "SQL", enrollmentFee: 0, paymentType: 'installment', monthlyFee: 0, paymentPlans: [{name: "One-Time", totalAmount: 2500, installments: [2500]}, {name: "Two Installments", totalAmount: 3200, installments: [1600, 1600]}, {name: "Three Installments", totalAmount: 2700, installments: [900, 900, 900]}], examFees: [] },
-    { id: "ADCA", name: "ADCA", enrollmentFee: 550, paymentType: 'monthly', monthlyFee: 500, paymentPlans: [], examFees: [{name: "Exam Fee", amount: 300}] },
-    { id: "ADFA", name: "ADFA", enrollmentFee: 550, paymentType: 'monthly', monthlyFee: 500, paymentPlans: [], examFees: [{name: "Exam Fee", amount: 300}] },
-    { id: "OLevel", name: "O Level", enrollmentFee: 1250, paymentType: 'monthly', monthlyFee: 500, paymentPlans: [], examFees: [{name: "M1", amount: 1250}, {name: "M2", amount: 1250}, {name: "M3", amount: 1250}, {name: "M4", amount: 1250}, {name: "Practical", amount: 900}] },
+const PREDEFINED_COURSES: Omit<Course, 'id'>[] = [
+    { name: "CCC", enrollmentFee: 0, paymentType: 'installment', monthlyFee: 0, paymentPlans: [{name: "One-Time", totalAmount: 2000, installments: [2000]}, {name: "Two Installments", totalAmount: 2200, installments: [1100, 1100]}], examFees: [] },
+    { name: "Tally", enrollmentFee: 0, paymentType: 'installment', monthlyFee: 0, paymentPlans: [{name: "One-Time", totalAmount: 2500, installments: [2500]}, {name: "Two Installments", totalAmount: 2600, installments: [1300, 1300]}], examFees: [] },
+    { name: "Premium Tally", enrollmentFee: 0, paymentType: 'installment', monthlyFee: 0, paymentPlans: [{name: "One-Time", totalAmount: 3000, installments: [3000]}, {name: "Two Installments", totalAmount: 3200, installments: [1600, 1600]}, {name: "Three Installments", totalAmount: 3600, installments: [1200, 1200, 1200]}], examFees: [] },
+    { name: "Coral Draw & PhotoShop (DTP)", enrollmentFee: 0, paymentType: 'installment', monthlyFee: 0, paymentPlans: [{name: "One-Time", totalAmount: 3000, installments: [3000]}, {name: "Two Installments", totalAmount: 3200, installments: [1600, 1600]}, {name: "Three Installments", totalAmount: 3600, installments: [1200, 1200, 1200]}], examFees: [] },
+    { name: "Excel", enrollmentFee: 0, paymentType: 'installment', monthlyFee: 0, paymentPlans: [{name: "One-Time", totalAmount: 2500, installments: [2500]}, {name: "Two Installments", totalAmount: 2700, installments: [1350, 1350]}, {name: "Three Installments", totalAmount: 2700, installments: [900, 900, 900]}], examFees: [] },
+    { name: "HTML, CSS, JavaScript", enrollmentFee: 0, paymentType: 'installment', monthlyFee: 0, paymentPlans: [{name: "One-Time", totalAmount: 2500, installments: [2500]}, {name: "Two Installments", totalAmount: 2700, installments: [1350, 1350]}, {name: "Three Installments", totalAmount: 2700, installments: [900, 900, 900]}], examFees: [] },
+    { name: "Python", enrollmentFee: 0, paymentType: 'installment', monthlyFee: 0, paymentPlans: [{name: "One-Time", totalAmount: 2500, installments: [2500]}, {name: "Two Installments", totalAmount: 2700, installments: [1350, 1350]}, {name: "Three Installments", totalAmount: 2700, installments: [900, 900, 900]}], examFees: [] },
+    { name: "SQL", enrollmentFee: 0, paymentType: 'installment', monthlyFee: 0, paymentPlans: [{name: "One-Time", totalAmount: 2500, installments: [2500]}, {name: "Two Installments", totalAmount: 2700, installments: [1350, 1350]}, {name: "Three Installments", totalAmount: 2700, installments: [900, 900, 900]}], examFees: [] },
+    { name: "ADCA", enrollmentFee: 550, paymentType: 'monthly', monthlyFee: 500, paymentPlans: [], examFees: [{name: "Exam Fee", amount: 300}] },
+    { name: "ADFA", enrollmentFee: 550, paymentType: 'monthly', monthlyFee: 500, paymentPlans: [], examFees: [{name: "Exam Fee", amount: 300}] },
+    { name: "O Level", enrollmentFee: 1250, paymentType: 'monthly', monthlyFee: 500, paymentPlans: [], examFees: [{name: "M1", amount: 1250}, {name: "M2", amount: 1250}, {name: "M3", amount: 1250}, {name: "M4", amount: 1250}, {name: "Practical", amount: 900}] },
 ];
 
 
@@ -119,10 +119,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         const batch = writeBatch(db);
         let hasChanges = false;
         for (const pc of PREDEFINED_COURSES) {
-            if (!existingCourses.find(ec => ec.id === pc.id)) {
-                const courseRef = doc(db, "courses", pc.id);
+            if (!existingCourses.some(ec => ec.name === pc.name)) {
+                const courseRef = doc(collection(db, "courses"));
                 batch.set(courseRef, pc);
-                existingCourses.push(pc);
+                existingCourses.push({...pc, id: courseRef.id});
                 hasChanges = true;
             }
         }
