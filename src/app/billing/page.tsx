@@ -31,7 +31,7 @@ import { cn } from '@/lib/utils';
 
 
 export default function BillingPage() {
-  const { students, courses, addPayment, isLoading: isAppContextLoading, addCustomFee, updateCustomFeeStatus } = useAppContext();
+  const { students, courses, addPayment, isLoading: isAppContextLoading, addCustomFee, updateCustomFeeStatus } from useAppContext();
   const { toast } = useToast();
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -388,8 +388,8 @@ function FeeDetailsTabs({student, course, onPay}: {student: Student, course: Cou
                 <TabsTrigger value="exam"><BookCopy className="mr-2 h-4 w-4"/>Exam Fees</TabsTrigger>
                 <TabsTrigger value="custom"><FilePlus className="mr-2 h-4 w-4"/>Custom</TabsTrigger>
             </TabsList>
-            <ScrollArea className="h-[calc(100vh-42rem)] mt-4">
-                <div className="pr-3 space-y-4">
+            <div className="mt-4">
+                <div className="space-y-4">
                  {/* Enrollment Fee always on top */}
                  <Card>
                     <CardHeader className="p-4">
@@ -469,8 +469,7 @@ function FeeDetailsTabs({student, course, onPay}: {student: Student, course: Cou
                     )) : <p className="text-muted-foreground text-center py-4">No custom fees added.</p>}
                 </TabsContent>
                 </div>
-            </ScrollArea>
+            </div>
         </Tabs>
     );
 }
-
