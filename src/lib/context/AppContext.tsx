@@ -201,6 +201,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       ...newStudentPayload,
       enrollmentDate: Timestamp.fromDate(new Date(isoEnrollmentDate)),
       photoUrl: photoUrlToSave || null,
+      selectedPaymentPlanName: newStudentPayload.selectedPaymentPlanName || null,
     };
 
     const docRef = await addDoc(collection(db, 'students'), payloadForFirestore);
