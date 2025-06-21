@@ -29,7 +29,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
 import { useAppContext } from '@/lib/context/AppContext';
-import type { Student, StudentFormData, Course } from '@/lib/types';
+import type { Student, StudentFormData, Course, PaymentPlan } from '@/lib/types';
 import { DateOfBirthPicker } from '@/components/students/DateOfBirthPicker';
 import { EnrollmentDateDropdownPicker } from '@/components/students/EnrollmentDateDropdownPicker';
 import { DOB_DAYS, DOB_MONTHS, DOB_YEARS, COURSE_DURATION_UNITS, MOBILE_REGEX, AADHAR_REGEX } from '@/lib/constants';
@@ -59,6 +59,7 @@ const initialStudentFormState: StudentFormData = {
   courseDurationUnit: 'months',
   photoFile: null,
   photoDataUri: null,
+  selectedPaymentPlanName: undefined,
 };
 
 export default function StudentsPage() {
@@ -66,7 +67,7 @@ export default function StudentsPage() {
   const [isStudentFormDialogOpen, setIsStudentFormDialogOpen] = useState(false);
   const [studentForm, setStudentForm] = useState<StudentFormData>(initialStudentFormState);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
-  const [selectedCourseDetails, setSelectedCourseDetails] = useState<{enrollmentFee: number, monthlyFee: number} | null>(null);
+  const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
   const { toast } = useToast();
   
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
@@ -81,14 +82,23 @@ export default function StudentsPage() {
     if (studentForm.courseId && courses.length > 0) {
       const course = courses.find(c => c.id === studentForm.courseId);
       if (course) {
-        setSelectedCourseDetails({ enrollmentFee: course.enrollmentFee, monthlyFee: course.monthlyFee });
+        setSelectedCourse(course);
+        // If switching to an installment course, set default plan if none selected
+        if(course.paymentType === 'installment' && !studentForm.selectedPaymentPlanName && course.paymentPlans?.length > 0) {
+            setStudentForm(prev => ({...prev, selectedPaymentPlanName: course.paymentPlans[0].name}));
+        }
+        // If switching to a monthly course, clear the plan selection
+        if (course.paymentType === 'monthly') {
+            setStudentForm(prev => ({...prev, selectedPaymentPlanName: undefined}));
+        }
       } else {
-        setSelectedCourseDetails(null);
+        setSelectedCourse(null);
       }
     } else {
-      setSelectedCourseDetails(null);
+      setSelectedCourse(null);
     }
-  }, [studentForm.courseId, courses]);
+  }, [studentForm.courseId, courses, studentForm.selectedPaymentPlanName]);
+
 
   useEffect(() => {
     if (isCameraOpen) {
@@ -191,27 +201,20 @@ export default function StudentsPage() {
       toast({ title: "Error", description: "Please select a course.", variant: "destructive" });
       return;
     }
+    const course = courses.find(c => c.id === studentForm.courseId);
+    if(course?.paymentType === 'installment' && !studentForm.selectedPaymentPlanName) {
+        toast({ title: "Error", description: "Please select a payment plan for this course.", variant: "destructive" });
+        return;
+    }
 
-    const { enrollmentDate: enrollmentDateObj, dob: dobObj, ...restOfForm } = studentForm;
-    const isoEnrollmentDate = `${enrollmentDateObj.year}-${enrollmentDateObj.month}-${enrollmentDateObj.day}`;
-    
-    // DOB is already an object {day, month, year}, which is what updateStudent expects for its dob field.
-    // For addStudent, StudentFormData is passed directly.
 
     try {
       if (editingStudent) {
-        const photoToBeRemoved = photoPreview === null && !!editingStudent.photoUrl && !studentForm.photoFile && !studentForm.photoDataUri;
-        
-        const updatePayload: Partial<Omit<Student, 'id' | 'paymentHistory' | 'enrollmentNumber' | 'enrollmentDate' | 'dob'>> & { enrollmentDate?: string; dob?: {day: string, month: string, year: string }; photoFile?: File | null; photoDataUri?: string | null; photoToBeRemoved?: boolean } = {
-          ...restOfForm, 
-          enrollmentDate: isoEnrollmentDate, // Convert to ISO string for update
-          dob: studentForm.dob, // Keep as is: { day, month, year }
-          photoFile: studentForm.photoFile,
-          photoDataUri: studentForm.photoDataUri,
-          photoToBeRemoved,
-        };
-        
-        await updateStudent(editingStudent.id, updatePayload);
+        // This needs to be adapted to send the full StudentFormData shape for update logic in AppContext
+         await updateStudent(editingStudent.id, {
+          ...studentForm,
+          photoToBeRemoved: photoPreview === null && !!editingStudent.photoUrl && !studentForm.photoFile && !studentForm.photoDataUri,
+        });
         toast({ title: "Success", description: "Student details updated successfully." });
 
       } else {
@@ -220,18 +223,6 @@ export default function StudentsPage() {
       }
 
       setIsStudentFormDialogOpen(false);
-      const todayForForm = new Date();
-      setStudentForm({
-        ...initialStudentFormState,
-        enrollmentDate: {
-          day: String(todayForForm.getDate()).padStart(2, '0'),
-          month: String(todayForForm.getMonth() + 1).padStart(2, '0'),
-          year: String(todayForForm.getFullYear()),
-        }
-      });
-      setSelectedCourseDetails(null);
-      handleRemovePhoto(); 
-      setEditingStudent(null);
     } catch (error: any) {
       console.error("Student operation failed:", error);
       toast({
@@ -253,7 +244,7 @@ export default function StudentsPage() {
           year: String(todayForForm.getFullYear()),
         }
       });
-    setSelectedCourseDetails(null);
+    setSelectedCourse(null);
     handleRemovePhoto(); 
     setIsCameraOpen(false); 
     setIsStudentFormDialogOpen(true);
@@ -263,12 +254,11 @@ export default function StudentsPage() {
     setEditingStudent(student);
     
     const enrollmentDateParts = student.enrollmentDate.split('T')[0].split('-');
-    // Student.dob is already { day, month, year }
     
     setStudentForm({
       name: student.name,
       fatherName: student.fatherName,
-      dob: student.dob, // Directly use the object
+      dob: student.dob,
       mobile: student.mobile,
       aadhar: student.aadhar,
       enrollmentDate: { day: enrollmentDateParts[2], month: enrollmentDateParts[1], year: enrollmentDateParts[0] },
@@ -277,11 +267,28 @@ export default function StudentsPage() {
       courseDurationUnit: student.courseDurationUnit,
       photoFile: null, 
       photoDataUri: null,
+      selectedPaymentPlanName: student.selectedPaymentPlanName,
     });
     setPhotoPreview(student.photoUrl || null);
     setIsCameraOpen(false);
     setIsStudentFormDialogOpen(true);
   };
+  
+  const closeDialog = () => {
+     setIsStudentFormDialogOpen(false);
+     handleCloseCamera(); 
+     setEditingStudent(null); 
+     handleRemovePhoto(); 
+     const todayForForm = new Date();
+     setStudentForm({
+        ...initialStudentFormState,
+        enrollmentDate: {
+            day: String(todayForForm.getDate()).padStart(2, '0'),
+            month: String(todayForForm.getMonth() + 1).padStart(2, '0'),
+            year: String(todayForForm.getFullYear()),
+        }
+     });
+  }
 
   const handleMarkAsLeft = async (studentId: string) => {
     try {
@@ -314,23 +321,7 @@ export default function StudentsPage() {
   );
   
   const renderStudentDialog = () => (
-    <Dialog open={isStudentFormDialogOpen} onOpenChange={(isOpen) => {
-        setIsStudentFormDialogOpen(isOpen);
-        if (!isOpen) {
-            handleCloseCamera(); 
-            setEditingStudent(null); 
-            handleRemovePhoto(); 
-            const todayForForm = new Date();
-            setStudentForm({
-              ...initialStudentFormState,
-              enrollmentDate: {
-                day: String(todayForForm.getDate()).padStart(2, '0'),
-                month: String(todayForForm.getMonth() + 1).padStart(2, '0'),
-                year: String(todayForForm.getFullYear()),
-              }
-            });
-        }
-    }}>
+    <Dialog open={isStudentFormDialogOpen} onOpenChange={(isOpen) => !isOpen && closeDialog()}>
       <DialogContent className="sm:max-w-lg shadow-2xl rounded-lg">
         <DialogHeader>
           <DialogTitle className="font-headline text-primary">{editingStudent ? 'Edit Student Details' : 'Add New Student'}</DialogTitle>
@@ -432,12 +423,28 @@ export default function StudentsPage() {
                 </SelectContent>
               </Select>
             </div>
-            {selectedCourseDetails && (
-              <div className="grid grid-cols-2 gap-4 p-3 border rounded-md bg-primary/5">
-                  <p className="text-sm">Enrollment Fee: <span className="font-bold text-primary">₹{selectedCourseDetails.enrollmentFee.toLocaleString()}</span></p>
-                  <p className="text-sm">Monthly Fee: <span className="font-bold text-primary">₹{selectedCourseDetails.monthlyFee.toLocaleString()}</span></p>
-              </div>
+            
+            {selectedCourse && (
+                <div className="p-3 border rounded-md bg-primary/5 text-sm">
+                    <p>Payment Type: <span className="font-bold text-primary capitalize">{selectedCourse.paymentType}</span></p>
+                    {selectedCourse.paymentType === 'monthly' ? (
+                        <p>Monthly Fee: <span className="font-bold text-primary">₹{selectedCourse.monthlyFee.toLocaleString()}</span></p>
+                    ) : selectedCourse.paymentPlans?.length > 0 && (
+                        <div className="mt-2 space-y-1">
+                          <Label htmlFor="selectedPaymentPlanName">Payment Plan</Label>
+                          <Select name="selectedPaymentPlanName" value={studentForm.selectedPaymentPlanName} onValueChange={(value) => setStudentForm(prev => ({ ...prev, selectedPaymentPlanName: value }))} required>
+                            <SelectTrigger><SelectValue placeholder="Select a payment plan" /></SelectTrigger>
+                            <SelectContent>
+                              {selectedCourse.paymentPlans.map(plan => (
+                                <SelectItem key={plan.name} value={plan.name}>{plan.name} (Total: ₹{plan.totalAmount.toLocaleString()})</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                    )}
+                </div>
             )}
+            
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                   <Label htmlFor="courseDurationValue">Course Duration</Label>
@@ -610,4 +617,3 @@ export default function StudentsPage() {
     </>
   );
 }
-

@@ -16,14 +16,19 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
 import { useAppContext } from '@/lib/context/AppContext';
-import type { Course, CourseFormData } from '@/lib/types';
+import type { Course, CourseFormData, PaymentPlan, ExamFee } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Textarea } from '@/components/ui/textarea';
 
 const initialCourseFormState: CourseFormData = {
   name: '',
   enrollmentFee: 0,
+  paymentType: 'monthly',
   monthlyFee: 0,
+  paymentPlansJSON: '[]',
+  examFeesJSON: '[]',
 };
 
 export default function CoursesPage() {
@@ -33,31 +38,59 @@ export default function CoursesPage() {
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
   const { toast } = useToast();
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
+    const isNumericField = ['enrollmentFee', 'monthlyFee'].includes(name);
     setCourseForm((prev) => ({
       ...prev,
-      [name]: name === 'name' ? value : parseFloat(value) || 0,
+      [name]: isNumericField ? parseFloat(value) || 0 : value,
     }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!courseForm.name || courseForm.enrollmentFee <= 0 || courseForm.monthlyFee <= 0) {
-      toast({ title: "Error", description: "Please fill all fields with valid values.", variant: "destructive" });
+
+    let paymentPlans: PaymentPlan[] = [];
+    let examFees: ExamFee[] = [];
+
+    try {
+      if (courseForm.paymentType === 'installment') {
+        paymentPlans = JSON.parse(courseForm.paymentPlansJSON);
+      }
+      examFees = JSON.parse(courseForm.examFeesJSON || '[]');
+    } catch (error) {
+      toast({ title: "Error", description: "Invalid JSON format in payment plans or exam fees.", variant: "destructive" });
       return;
     }
+    
+    if (!courseForm.name || courseForm.enrollmentFee < 0) {
+      toast({ title: "Error", description: "Please fill name and enrollment fee.", variant: "destructive" });
+      return;
+    }
+    
+    if (courseForm.paymentType === 'monthly' && courseForm.monthlyFee <= 0) {
+        toast({ title: "Error", description: "Monthly fee must be positive for monthly courses.", variant: "destructive" });
+        return;
+    }
+
+    const coursePayload = {
+      name: courseForm.name,
+      enrollmentFee: courseForm.enrollmentFee,
+      paymentType: courseForm.paymentType,
+      monthlyFee: courseForm.paymentType === 'monthly' ? courseForm.monthlyFee : 0,
+      paymentPlans: courseForm.paymentType === 'installment' ? paymentPlans : [],
+      examFees: examFees,
+    };
+
     try {
       if (editingCourse) {
-        await updateCourse({ ...editingCourse, ...courseForm });
+        await updateCourse({ ...editingCourse, ...coursePayload });
         toast({ title: "Success", description: "Course updated successfully." });
       } else {
-        await addCourse(courseForm);
+        await addCourse(coursePayload);
         toast({ title: "Success", description: "Course added successfully." });
       }
       setIsDialogOpen(false);
-      setCourseForm(initialCourseFormState);
-      setEditingCourse(null);
     } catch (error: any) {
       console.error("Course operation failed:", error);
       toast({
@@ -76,12 +109,18 @@ export default function CoursesPage() {
 
   const openEditDialog = (course: Course) => {
     setEditingCourse(course);
-    setCourseForm({ name: course.name, enrollmentFee: course.enrollmentFee, monthlyFee: course.monthlyFee });
+    setCourseForm({
+        name: course.name,
+        enrollmentFee: course.enrollmentFee,
+        monthlyFee: course.monthlyFee,
+        paymentType: course.paymentType,
+        paymentPlansJSON: JSON.stringify(course.paymentPlans || [], null, 2),
+        examFeesJSON: JSON.stringify(course.examFees || [], null, 2),
+    });
     setIsDialogOpen(true);
   };
 
   const handleDeleteCourse = async (courseId: string) => {
-    // Add confirmation dialog here if needed via AlertDialog component
     try {
       await deleteCourse(courseId);
       toast({ title: "Success", description: "Course deleted successfully." });
@@ -133,15 +172,37 @@ export default function CoursesPage() {
             <Card key={course.id} className="flex flex-col shadow-lg hover:shadow-xl transition-shadow duration-300">
               <CardHeader>
                 <CardTitle className="font-headline text-primary">{course.name}</CardTitle>
-                <CardDescription>Manage course details and fees.</CardDescription>
+                <CardDescription>Payment Type: <span className="capitalize">{course.paymentType}</span></CardDescription>
               </CardHeader>
               <CardContent className="flex-grow">
                 <p className="text-sm text-muted-foreground">
                   Enrollment Fee: <span className="font-semibold text-foreground">₹{course.enrollmentFee.toLocaleString()}</span>
                 </p>
-                <p className="text-sm text-muted-foreground">
-                  Monthly Fee: <span className="font-semibold text-foreground">₹{course.monthlyFee.toLocaleString()}</span>
-                </p>
+                {course.paymentType === 'monthly' && (
+                    <p className="text-sm text-muted-foreground">
+                    Monthly Fee: <span className="font-semibold text-foreground">₹{course.monthlyFee.toLocaleString()}</span>
+                    </p>
+                )}
+                 {course.paymentType === 'installment' && course.paymentPlans?.length > 0 && (
+                    <div className="text-sm text-muted-foreground">
+                        <span className="font-semibold text-foreground">Payment Plans:</span>
+                        <ul className="list-disc pl-5">
+                            {course.paymentPlans.map(plan => (
+                                <li key={plan.name}>{plan.name} (₹{plan.totalAmount.toLocaleString()})</li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
+                 {course.examFees?.length > 0 && (
+                     <div className="text-sm text-muted-foreground mt-2">
+                        <span className="font-semibold text-foreground">Exam Fees:</span>
+                        <ul className="list-disc pl-5">
+                            {course.examFees.map(fee => (
+                                <li key={fee.name}>{fee.name} (₹{fee.amount.toLocaleString()})</li>
+                            ))}
+                        </ul>
+                    </div>
+                 )}
               </CardContent>
               <div className="border-t p-4 flex justify-end space-x-2">
                 <Button variant="outline" size="sm" onClick={() => openEditDialog(course)} className="animate-button-click">
@@ -158,36 +219,81 @@ export default function CoursesPage() {
       )}
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-[425px] shadow-2xl rounded-lg">
+        <DialogContent className="sm:max-w-md shadow-2xl rounded-lg">
           <DialogHeader>
             <DialogTitle className="font-headline text-primary">{editingCourse ? 'Edit Course' : 'Add New Course'}</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleSubmit}>
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="name" className="text-right">Name</Label>
-                <Input id="name" name="name" value={courseForm.name} onChange={handleInputChange} className="col-span-3" placeholder="e.g., Web Development" />
+          <ScrollArea className="max-h-[70vh]">
+          <form onSubmit={handleSubmit} className="pr-4 py-4 space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="name">Course Name</Label>
+                <Input id="name" name="name" value={courseForm.name} onChange={handleInputChange} placeholder="e.g., Web Development" />
               </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="enrollmentFee" className="text-right">Enrollment Fee (₹)</Label>
-                <Input id="enrollmentFee" name="enrollmentFee" type="number" value={courseForm.enrollmentFee} onChange={handleInputChange} className="col-span-3" placeholder="e.g., 1000" />
+               <div className="space-y-2">
+                <Label htmlFor="enrollmentFee">Enrollment Fee (₹)</Label>
+                <Input id="enrollmentFee" name="enrollmentFee" type="number" value={courseForm.enrollmentFee} onChange={handleInputChange} placeholder="e.g., 500" />
               </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="monthlyFee" className="text-right">Monthly Fee (₹)</Label>
-                <Input id="monthlyFee" name="monthlyFee" type="number" value={courseForm.monthlyFee} onChange={handleInputChange} className="col-span-3" placeholder="e.g., 500" />
+              <div className="space-y-2">
+                <Label>Payment Type</Label>
+                <RadioGroup
+                    name="paymentType"
+                    value={courseForm.paymentType}
+                    onValueChange={(value: 'monthly' | 'installment') => setCourseForm(prev => ({ ...prev, paymentType: value }))}
+                    className="flex gap-4"
+                >
+                    <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="monthly" id="r1" />
+                        <Label htmlFor="r1">Monthly Fees</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="installment" id="r2" />
+                        <Label htmlFor="r2">Installment Plan</Label>
+                    </div>
+                </RadioGroup>
               </div>
-            </div>
-            <DialogFooter>
+
+              {courseForm.paymentType === 'monthly' ? (
+                <div className="space-y-2">
+                    <Label htmlFor="monthlyFee">Monthly Fee (₹)</Label>
+                    <Input id="monthlyFee" name="monthlyFee" type="number" value={courseForm.monthlyFee} onChange={handleInputChange} placeholder="e.g., 500" />
+                </div>
+                ) : (
+                <div className="space-y-2">
+                    <Label htmlFor="paymentPlansJSON">Payment Plans (JSON format)</Label>
+                    <Textarea
+                    id="paymentPlansJSON"
+                    name="paymentPlansJSON"
+                    value={courseForm.paymentPlansJSON}
+                    onChange={handleInputChange}
+                    rows={5}
+                    placeholder='[{"name": "One-Time", "totalAmount": 2000, "installments": [2000]}]'
+                    />
+                     <p className="text-xs text-muted-foreground">Use valid JSON array format.</p>
+                </div>
+                )}
+
+                <div className="space-y-2">
+                    <Label htmlFor="examFeesJSON">Exam Fees (JSON format, optional)</Label>
+                    <Textarea
+                    id="examFeesJSON"
+                    name="examFeesJSON"
+                    value={courseForm.examFeesJSON}
+                    onChange={handleInputChange}
+                    rows={3}
+                    placeholder='[{"name": "M1 Exam", "amount": 1250}]'
+                    />
+                    <p className="text-xs text-muted-foreground">Use valid JSON array format.</p>
+                </div>
+            <DialogFooter className="pt-4">
               <DialogClose asChild>
                 <Button type="button" variant="outline" className="animate-button-click">Cancel</Button>
               </DialogClose>
               <Button type="submit" className="animate-button-click">{editingCourse ? 'Save Changes' : 'Add Course'}</Button>
             </DialogFooter>
           </form>
+          </ScrollArea>
         </DialogContent>
       </Dialog>
     </>
   );
 }
-
-    
