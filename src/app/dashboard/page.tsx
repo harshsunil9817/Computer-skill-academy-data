@@ -65,6 +65,7 @@ export default function DashboardPage() {
       const currentDate = new Date();
       const currentMonth = getMonth(currentDate);
       const currentYearNum = getYear(currentDate);
+      const currentMonthStr = format(currentDate, "MMMM yyyy");
 
       let activeStudentsCount = 0;
       let newRegistrationsThisMonthCount = 0;
@@ -75,48 +76,52 @@ export default function DashboardPage() {
       students.forEach(student => {
         const course = courseMap.get(student.courseId);
         
-        // Accumulate total revenue from all payments
-        totalRevenueAgg += student.paymentHistory.reduce((sum, p) => sum + p.amount, 0);
+        totalRevenueAgg += (student.paymentHistory || []).reduce((sum, p) => sum + p.amount, 0);
 
-        // Count active students
         if (student.status === 'active' || student.status === 'enrollment_pending') {
           activeStudentsCount++;
         }
         
-        // Count new registrations this month
         const enrollmentDate = parseISO(student.enrollmentDate);
         if (getMonth(enrollmentDate) === currentMonth && getYear(enrollmentDate) === currentYearNum) {
           newRegistrationsThisMonthCount++;
         }
 
-        // Skip fee calculations if student has no course assigned
         if (!course) return;
+
+        // --- Calculate Fees Due This Month ---
+        if (course.paymentType === 'monthly' && (student.status === 'active' || student.status === 'completed_unpaid')) {
+            const courseStartDate = parseISO(student.enrollmentDate);
+            const courseDurationInMonths = student.courseDurationValue * (student.courseDurationUnit === 'years' ? 12 : 1);
+            const courseEndDate = addMonths(courseStartDate, courseDurationInMonths);
+            
+            // Check if current month is within the student's active course time
+            if (!isBefore(currentDate, startOfMonth(courseStartDate)) && isBefore(startOfMonth(currentDate), courseEndDate)) {
+                const paidForCurrentMonth = (student.paymentHistory || [])
+                    .filter(p => p.type === 'monthly' && p.referenceId === currentMonthStr)
+                    .reduce((sum, p) => sum + p.amount, 0);
+                
+                const dueForMonth = Math.max(0, course.monthlyFee - paidForCurrentMonth);
+                feesDueThisMonthAgg += dueForMonth;
+            }
+        }
+
 
         // --- Calculate Total Dues All Time for this student ---
         let totalBilled = 0;
-        const totalPaid = student.paymentHistory.reduce((sum, p) => sum + p.amount, 0);
+        const totalPaid = (student.paymentHistory || []).reduce((sum, p) => sum + p.amount, 0);
 
-        // 1. Enrollment Fee
         totalBilled += course.enrollmentFee;
-
-        // 2. Exam Fees
         totalBilled += (course.examFees || []).reduce((sum, fee) => sum + fee.amount, 0);
-        
-        // 3. Custom Fees added to the student
-        totalBilled += (student.customFees || []).reduce((sum, fee) => sum + fee.amount, 0);
+        totalBilled += (student.customFees || []).filter(f => f.status === 'due').reduce((sum, fee) => sum + fee.amount, 0);
 
-        // 4. Course Fees (either monthly or installment based)
         if (course.paymentType === 'monthly') {
             const startDate = startOfMonth(enrollmentDate);
             const endDate = new Date();
-            // Calculate the number of full months passed, including the current one.
             const monthsDifference = (endDate.getFullYear() - startDate.getFullYear()) * 12 + (endDate.getMonth() - startDate.getMonth());
             const courseDurationInMonths = student.courseDurationValue * (student.courseDurationUnit === 'years' ? 12 : 1);
-            
-            // Number of months to bill is the lesser of months passed or total course duration
             const numberOfBillableMonths = Math.min(Math.max(0, monthsDifference + 1), courseDurationInMonths);
             totalBilled += numberOfBillableMonths * course.monthlyFee;
-            
         } else if (course.paymentType === 'installment' && student.selectedPaymentPlanName) {
             const plan = (course.paymentPlans || []).find(p => p.name === student.selectedPaymentPlanName);
             if (plan) {
@@ -129,7 +134,7 @@ export default function DashboardPage() {
       
       setDashboardStats({
         activeStudents: activeStudentsCount,
-        feesDueThisMonth: feesDueThisMonthAgg, // Calculation for this is complex and deferred
+        feesDueThisMonth: feesDueThisMonthAgg,
         totalRevenue: totalRevenueAgg,
         newRegistrationsThisMonth: newRegistrationsThisMonthCount,
         totalDuesAllTime: totalDuesAllTimeAgg,
@@ -163,7 +168,7 @@ export default function DashboardPage() {
           title="Fees Due This Month"
           value={`₹${dashboardStats.feesDueThisMonth.toLocaleString()}`}
           icon={DollarSign}
-          description="Calculation pending update."
+          description="Total unpaid monthly fees."
           className="shadow-lg hover:shadow-xl transition-shadow duration-300"
           isCalculating={isCalculatingStats}
         />
