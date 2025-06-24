@@ -63,6 +63,8 @@ export interface Student {
   photoUrl?: string;
   selectedPaymentPlanName?: string;
   customFees: CustomFee[];
+  overriddenEnrollmentFee?: number;
+  overriddenMonthlyFee?: number;
   attendancePercentage?: number;
   grades?: string;
 }
@@ -91,4 +93,6 @@ export interface StudentFormData {
   photoFile?: File | null;
   photoDataUri?: string | null;
   selectedPaymentPlanName?: string;
+  overriddenEnrollmentFee?: number;
+  overriddenMonthlyFee?: number;
 }

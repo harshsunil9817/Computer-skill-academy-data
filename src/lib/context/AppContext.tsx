@@ -28,6 +28,7 @@ interface AppContextType {
   addStudent: (student: StudentFormData) => Promise<void>;
   updateStudent: (studentId: string, studentData: Partial<StudentFormData> & { photoToBeRemoved?: boolean, status?: string }) => Promise<void>;
   addPayment: (studentId: string, payment: Omit<PaymentRecord, 'id'>) => Promise<void>;
+  revertPayment: (studentId: string, paymentId: string) => Promise<void>;
   deleteStudent: (studentId: string) => Promise<void>;
   addCustomFee: (studentId: string, fee: Omit<CustomFee, 'id' | 'dateCreated' | 'status'> & { status: 'paid' | 'due'}) => Promise<void>;
   updateCustomFeeStatus: (studentId: string, feeId: string, status: 'paid' | 'due') => Promise<void>;
@@ -55,6 +56,8 @@ const mapDocToStudent = (docData: any): Student => ({
       datePaid: f.datePaid instanceof Timestamp ? f.datePaid.toDate().toISOString() : f.datePaid,
   })) || [],
   photoUrl: docData.photoUrl || undefined,
+  overriddenEnrollmentFee: docData.overriddenEnrollmentFee,
+  overriddenMonthlyFee: docData.overriddenMonthlyFee,
 });
 
 function dataURItoFile(dataURI: string, filename: string): File {
@@ -155,7 +158,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const login = (user: string, pass: string): boolean => {
-    if (user === 'sunilsir' && pass === 'sunil817') {
+    if (user.toLowerCase() === 'sunil singh' && pass === 'sunil817') {
       localStorage.setItem('isAuthenticated', 'true');
       setIsAuthenticated(true);
       return true;
@@ -230,6 +233,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       enrollmentDate: Timestamp.fromDate(new Date(isoEnrollmentDate)),
       photoUrl: photoUrlToSave || null,
       selectedPaymentPlanName: newStudentPayload.selectedPaymentPlanName || null,
+      overriddenEnrollmentFee: newStudentPayload.overriddenEnrollmentFee ?? null,
+      overriddenMonthlyFee: newStudentPayload.overriddenMonthlyFee ?? null,
     };
 
     const docRef = await addDoc(collection(db, 'students'), payloadForFirestore);
@@ -246,7 +251,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
     if (updateData.photoFile) {
         const fileToUpload = updateData.photoFile;
-        // Delete old photo if it exists
         if (currentStudent.photoUrl) {
             const oldFileId = getAppwriteFileIdFromUrl(currentStudent.photoUrl);
             if (oldFileId) {
@@ -288,12 +292,17 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     payloadForFirestore.photoUrl = finalPhotoUrl === undefined ? currentStudent.photoUrl : finalPhotoUrl;
     if (updateData.status) payloadForFirestore.status = updateData.status;
 
+    if ('overriddenEnrollmentFee' in updateData) {
+        payloadForFirestore.overriddenEnrollmentFee = updateData.overriddenEnrollmentFee ?? null;
+    }
+    if ('overriddenMonthlyFee' in updateData) {
+        payloadForFirestore.overriddenMonthlyFee = updateData.overriddenMonthlyFee ?? null;
+    }
     
     Object.keys(payloadForFirestore).forEach(key => payloadForFirestore[key] === undefined && delete payloadForFirestore[key]);
 
     await updateDoc(studentDocRef, payloadForFirestore);
 
-    // Create a representative object for local state update
     const updatedLocalStudentData = { ...currentStudent, ...payloadForFirestore };
     if(payloadForFirestore.enrollmentDate) {
         updatedLocalStudentData.enrollmentDate = payloadForFirestore.enrollmentDate.toDate().toISOString();
@@ -322,7 +331,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         if(newPayment.type === 'enrollment' && currentStudent.status === 'enrollment_pending') {
             const course = courses.find(c => c.id === currentStudent.courseId);
             const totalEnrollmentPaid = updatedPaymentHistory.filter(p => p.type === 'enrollment').reduce((sum,p) => sum+p.amount, 0);
-            if(course && totalEnrollmentPaid >= course.enrollmentFee) {
+            if(course && totalEnrollmentPaid >= (currentStudent.overriddenEnrollmentFee ?? course.enrollmentFee)) {
                 newStatus = 'active';
             }
         }
@@ -334,9 +343,43 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
         transaction.update(studentRef, { paymentHistory: paymentHistoryForFirestore, status: newStatus });
      });
-     // Re-fetch or update local state
      const updatedStudentDoc = await getDocs(collection(db, 'students'));
      setStudents(updatedStudentDoc.docs.map(doc => mapDocToStudent({ ...doc.data(), id: doc.id })));
+  };
+
+  const revertPayment = async (studentId: string, paymentId: string) => {
+    if (!db) throw new Error("Database not available.");
+    await runTransaction(db, async (transaction) => {
+      const studentRef = doc(db, 'students', studentId);
+      const studentDoc = await transaction.get(studentRef);
+      if (!studentDoc.exists()) throw new Error("Student not found.");
+
+      const currentStudent = mapDocToStudent(studentDoc.data());
+      const paymentToRevert = currentStudent.paymentHistory.find(p => p.id === paymentId);
+
+      if (!paymentToRevert) throw new Error("Payment record not found.");
+
+      const updatedPaymentHistory = currentStudent.paymentHistory.filter(p => p.id !== paymentId);
+      
+      let newStatus = currentStudent.status;
+      if (paymentToRevert.type === 'enrollment' && newStatus === 'active') {
+        const course = courses.find(c => c.id === currentStudent.courseId);
+        const totalEnrollmentPaid = updatedPaymentHistory.filter(p => p.type === 'enrollment').reduce((sum, p) => sum + p.amount, 0);
+        if (course && totalEnrollmentPaid < (currentStudent.overriddenEnrollmentFee ?? course.enrollmentFee)) {
+          newStatus = 'enrollment_pending';
+        }
+      }
+
+      const paymentHistoryForFirestore = updatedPaymentHistory.map(p => ({
+          ...p,
+          date: Timestamp.fromDate(new Date(p.date)),
+      }));
+
+      transaction.update(studentRef, { paymentHistory: paymentHistoryForFirestore, status: newStatus });
+    });
+
+    const updatedStudentDoc = await getDocs(collection(db, 'students'));
+    setStudents(updatedStudentDoc.docs.map(doc => mapDocToStudent({ ...doc.data(), id: doc.id })));
   };
 
   const addCustomFee = async (studentId: string, fee: Omit<CustomFee, 'id' | 'dateCreated'>) => {
@@ -411,7 +454,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         });
     });
     await batch.commit();
-    // Refetch all data to ensure UI is consistent
     const studentSnapshot = await getDocs(collection(db, 'students'));
     const existingStudents = studentSnapshot.docs.map(doc => mapDocToStudent({ ...doc.data(), id: doc.id }));
     setStudents(existingStudents);
@@ -429,6 +471,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         addStudent,
         updateStudent,
         addPayment,
+        revertPayment,
         deleteStudent,
         addCustomFee,
         updateCustomFeeStatus,

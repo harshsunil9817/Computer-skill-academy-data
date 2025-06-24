@@ -1,8 +1,8 @@
 
 "use client";
 import React, { useState, useMemo, useCallback } from 'react';
-import { DollarSign, CheckCircle, AlertCircle, History, Search, Users, UserCircle, Receipt, BookCopy, FilePlus, Banknote } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { DollarSign, History, Search, Users, UserCircle, Receipt, BookCopy, FilePlus, Banknote, IndianRupee, Clock, PiggyBank, RotateCcw } from 'lucide-react';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
@@ -13,7 +13,7 @@ import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
-import { format, addMonths, isBefore, startOfMonth, parseISO } from 'date-fns';
+import { format, addMonths, isBefore, startOfMonth, parseISO, differenceInMonths, formatDistanceToNowStrict } from 'date-fns';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -31,7 +31,7 @@ import { cn } from '@/lib/utils';
 
 
 export default function BillingPage() {
-  const { students, courses, addPayment, isLoading: isAppContextLoading, addCustomFee, updateCustomFeeStatus } = useAppContext();
+  const { students, courses, addPayment, isLoading: isAppContextLoading, addCustomFee, updateCustomFeeStatus, revertPayment } = useAppContext();
   const { toast } = useToast();
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -84,7 +84,7 @@ export default function BillingPage() {
         await addPayment(selectedStudent.id, {
             date: new Date().toISOString(),
             amount,
-            type: 'partial', // All general payments are partial, logic will apply them
+            type: 'partial',
             remarks: paymentRemarks || `General payment towards dues.`
         });
         toast({title: "Success", description: `Payment of ₹${amount.toLocaleString()} recorded.`});
@@ -140,6 +140,16 @@ export default function BillingPage() {
 
     } catch (error: any) {
         toast({title: "Error", description: `Failed to pay fee: ${error.message}`, variant: 'destructive'});
+    }
+  }
+
+  const handleRevertPayment = async (paymentId: string) => {
+    if (!selectedStudent) return;
+    try {
+      await revertPayment(selectedStudent.id, paymentId);
+      toast({ title: "Success", description: "Payment successfully reverted." });
+    } catch (error: any) {
+      toast({ title: "Error", description: `Failed to revert payment: ${error.message}`, variant: "destructive" });
     }
   }
 
@@ -208,7 +218,6 @@ export default function BillingPage() {
 
       {selectedStudent && selectedStudentCourse && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-slide-in">
-          {/* Left Column - Payment History */}
           <Card className="lg:col-span-1 shadow-lg">
             <CardHeader>
               <CardTitle className="flex items-center text-primary font-headline"><History className="mr-2 h-5 w-5" />Payment History</CardTitle>
@@ -218,11 +227,30 @@ export default function BillingPage() {
               <ScrollArea className="h-[calc(100vh-25rem)] pr-3">
                 {selectedStudent.paymentHistory.length > 0 ? (
                   selectedStudent.paymentHistory.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map(p => (
-                    <div key={p.id} className="mb-3 p-3 border rounded-md bg-background shadow-sm hover:shadow-md transition-shadow">
+                    <div key={p.id} className="mb-3 p-3 border rounded-md bg-background shadow-sm hover:shadow-md transition-shadow group relative">
                       <p className="font-semibold text-sm">₹{p.amount.toLocaleString()} <span className="text-xs capitalize text-muted-foreground">({p.type})</span></p>
                       <p className="text-xs text-muted-foreground">{new Date(p.date).toLocaleDateString()}</p>
                       {p.description && <p className="text-xs text-muted-foreground">For: {p.description}</p>}
                       {p.remarks && <p className="text-xs italic text-muted-foreground mt-1">Remark: {p.remarks}</p>}
+                       <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="ghost" size="icon" className="absolute top-1 right-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <RotateCcw className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Revert Payment?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Are you sure you want to revert the payment of ₹{p.amount.toLocaleString()} made on {new Date(p.date).toLocaleDateString()}? This action cannot be undone.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => handleRevertPayment(p.id)} className={cn(buttonVariants({ variant: "destructive" }))}>Confirm Revert</AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
                     </div>
                   ))
                 ) : (
@@ -232,25 +260,23 @@ export default function BillingPage() {
             </CardContent>
           </Card>
           
-          {/* Center Column - Fee Details */}
           <Card className="lg:col-span-1 shadow-lg">
              <CardHeader>
               <CardTitle className="font-headline text-primary">{selectedStudent.name} ({selectedStudent.enrollmentNumber || 'N/A'})</CardTitle>
               <CardDescription>Course: {selectedStudentCourse.name}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+                <FinancialSummary student={selectedStudent} course={selectedStudentCourse} />
                 <FeeDetailsTabs student={selectedStudent} course={selectedStudentCourse} onPay={handlePaySpecificFee} />
             </CardContent>
           </Card>
 
-          {/* Right Column - Payments & Custom Fees */}
           <Card className="lg:col-span-1 shadow-lg">
             <CardHeader>
                 <CardTitle className="flex items-center text-primary font-headline"><Banknote className="mr-2 h-5 w-5" />Actions</CardTitle>
                  <CardDescription>Record payments or add custom fees.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-                {/* General Payment Section */}
                 <div className="p-4 border rounded-lg bg-background">
                     <h3 className="font-semibold mb-3">Record General Payment</h3>
                     <div className="space-y-3">
@@ -268,7 +294,6 @@ export default function BillingPage() {
 
                 <Separator />
                 
-                {/* Custom Fee Section */}
                 <div className="p-4 border rounded-lg bg-background">
                     <h3 className="font-semibold mb-3 flex items-center"><FilePlus className="mr-2 h-5 w-5" />Add Custom Fee</h3>
                     <div className="space-y-3">
@@ -296,12 +321,72 @@ export default function BillingPage() {
   );
 }
 
-// Sub-component for the tabbed fee details
+function FinancialSummary({ student, course }: { student: Student, course: Course }) {
+  const summary = useMemo(() => {
+    const enrollmentFee = student.overriddenEnrollmentFee ?? course.enrollmentFee;
+    let totalBilled = enrollmentFee;
+
+    const totalPaid = (student.paymentHistory || []).reduce((sum, p) => sum + p.amount, 0);
+
+    if (course.paymentType === 'monthly') {
+      const monthlyFee = student.overriddenMonthlyFee ?? course.monthlyFee;
+      const startDate = startOfMonth(parseISO(student.enrollmentDate));
+      const endDate = new Date();
+      let monthsBilled = 0;
+      if (isBefore(startDate, endDate)) {
+          monthsBilled = differenceInMonths(endDate, startDate) + 1;
+      }
+      const courseDurationInMonths = student.courseDurationValue * (student.courseDurationUnit === 'years' ? 12 : 1);
+      const numberOfBillableMonths = Math.min(Math.max(0, monthsBilled), courseDurationInMonths);
+      totalBilled += numberOfBillableMonths * monthlyFee;
+    } else if (course.paymentType === 'installment' && student.selectedPaymentPlanName) {
+      const plan = course.paymentPlans.find(p => p.name === student.selectedPaymentPlanName);
+      if (plan) {
+        totalBilled += plan.totalAmount;
+      }
+    }
+
+    totalBilled += (course.examFees || []).reduce((sum, fee) => sum + fee.amount, 0);
+    totalBilled += (student.customFees || []).reduce((sum, fee) => sum + fee.amount, 0);
+
+    const totalDues = Math.max(0, totalBilled - totalPaid);
+
+    const enrollmentDate = parseISO(student.enrollmentDate);
+    const courseEndDate = addMonths(enrollmentDate, student.courseDurationValue * (student.courseDurationUnit === 'years' ? 12 : 1));
+    const timeRemaining = isBefore(new Date(), courseEndDate) ? `${formatDistanceToNowStrict(courseEndDate)} left` : "Finished";
+
+    return { totalPaid, totalDues, timeRemaining };
+  }, [student, course]);
+
+  return (
+    <Card className="bg-muted/50">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-lg flex items-center"><PiggyBank className="mr-2 h-5 w-5"/>Financial Summary</CardTitle>
+      </CardHeader>
+      <CardContent className="grid grid-cols-3 gap-2 text-center">
+        <div className="p-2 rounded-md bg-background">
+          <p className="text-sm text-muted-foreground">Paid</p>
+          <p className="text-lg font-bold text-green-600">₹{summary.totalPaid.toLocaleString()}</p>
+        </div>
+        <div className="p-2 rounded-md bg-background">
+          <p className="text-sm text-muted-foreground">Dues</p>
+          <p className="text-lg font-bold text-destructive">₹{summary.totalDues.toLocaleString()}</p>
+        </div>
+        <div className="p-2 rounded-md bg-background">
+          <p className="text-sm text-muted-foreground">Course Time</p>
+          <p className="text-base font-bold text-primary">{summary.timeRemaining}</p>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 function FeeDetailsTabs({student, course, onPay}: {student: Student, course: Course, onPay: Function}) {
 
     const { enrollmentDue } = useMemo(() => {
+        const fee = student.overriddenEnrollmentFee ?? course.enrollmentFee;
         const paid = (student.paymentHistory || []).filter(p => p.type === 'enrollment').reduce((sum,p) => sum+p.amount, 0);
-        return { enrollmentDue: Math.max(0, course.enrollmentFee - paid) };
+        return { enrollmentDue: Math.max(0, fee - paid) };
     }, [student, course]);
 
     const { installmentDues } = useMemo(() => {
@@ -310,13 +395,13 @@ function FeeDetailsTabs({student, course, onPay}: {student: Student, course: Cou
         const plan = (course.paymentPlans || []).find(p => p.name === student.selectedPaymentPlanName);
         if (!plan) return { installmentDues: [] };
 
-        const payments = (student.paymentHistory || []).filter(p => p.type === 'installment' || p.type === 'partial');
-
-        let totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
+        let totalPaidTowardsInstallments = (student.paymentHistory || [])
+            .filter(p => p.type === 'installment' || p.type === 'partial')
+            .reduce((sum, p) => sum + p.amount, 0);
 
         const dues = plan.installments.map((installmentAmount, index) => {
-            const paidForThis = Math.min(totalPaid, installmentAmount);
-            totalPaid -= paidForThis;
+            const paidForThis = Math.min(totalPaidTowardsInstallments, installmentAmount);
+            totalPaidTowardsInstallments -= paidForThis;
             return {
                 installment: index + 1,
                 amount: installmentAmount,
@@ -334,29 +419,26 @@ function FeeDetailsTabs({student, course, onPay}: {student: Student, course: Cou
         const enrollmentDate = parseISO(student.enrollmentDate);
         const firstBillableMonth = startOfMonth(enrollmentDate);
         const courseDurationInMonths = student.courseDurationValue * (student.courseDurationUnit === 'years' ? 12 : 1);
+        const feePerMonth = student.overriddenMonthlyFee ?? course.monthlyFee;
         
         for (let i=0; i<courseDurationInMonths; i++) {
             const monthDate = addMonths(firstBillableMonth, i);
-            const monthYearStr = format(monthDate, "MMMM yyyy");
-            
-            const paidForMonth = (student.paymentHistory || [])
-                .filter(p => p.description === monthYearStr || (p.type==='monthly' && p.referenceId === monthYearStr))
-                .reduce((sum, p) => sum + p.amount, 0);
-            
-            const partialsApplied = (student.paymentHistory || [])
-                .filter(p => p.type === 'partial' && p.description === monthYearStr)
-                .reduce((sum, p) => sum + p.amount, 0);
-            
-            const totalPaid = paidForMonth + partialsApplied;
+            if (isBefore(monthDate, new Date()) || monthDate.getMonth() === new Date().getMonth()) {
+                const monthYearStr = format(monthDate, "MMMM yyyy");
+                
+                const paidForMonth = (student.paymentHistory || [])
+                    .filter(p => p.referenceId === monthYearStr)
+                    .reduce((sum, p) => sum + p.amount, 0);
 
-            dues.push({
-                monthYear: monthYearStr,
-                amount: course.monthlyFee,
-                paid: totalPaid,
-                due: Math.max(0, course.monthlyFee - totalPaid),
-            });
+                dues.push({
+                    monthYear: monthYearStr,
+                    amount: feePerMonth,
+                    paid: paidForMonth,
+                    due: Math.max(0, feePerMonth - paidForMonth),
+                });
+            }
         }
-        return { monthlyDues: dues };
+        return { monthlyDues: dues.reverse() };
     }, [student, course]);
     
     const { examFeeDues } = useMemo(() => {
@@ -391,7 +473,6 @@ function FeeDetailsTabs({student, course, onPay}: {student: Student, course: Cou
             </TabsList>
             <div className="mt-4">
                 <div className="space-y-4">
-                 {/* Enrollment Fee always on top */}
                  <Card>
                     <CardHeader className="p-4">
                         <CardTitle className="text-base">Enrollment Fee</CardTitle>
@@ -399,7 +480,7 @@ function FeeDetailsTabs({student, course, onPay}: {student: Student, course: Cou
                     <CardContent className="p-4 pt-0">
                          <div className="flex justify-between items-center">
                             <div>
-                                <p className="font-semibold">₹{course.enrollmentFee.toLocaleString()}</p>
+                                <p className="font-semibold">₹{(student.overriddenEnrollmentFee ?? course.enrollmentFee).toLocaleString()}</p>
                                 {enrollmentDue === 0 ? <p className="text-sm text-green-600">Paid</p> : <p className="text-sm text-destructive">Due: ₹{enrollmentDue.toLocaleString()}</p>}
                             </div>
                              {enrollmentDue > 0 && <Button size="sm" onClick={() => handlePayWrapper('enrollment', enrollmentDue, 'Enrollment Fee', 'enrollment_fee')}>Pay Now</Button>}

@@ -1,8 +1,8 @@
 
 "use client";
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Image from 'next/image';
-import { PlusCircle, User, Users, MoreVertical, Trash2, UserMinus, ImageUp, Camera, XCircle, Edit, CreditCard } from 'lucide-react';
+import { PlusCircle, User, Users, MoreVertical, Trash2, UserMinus, ImageUp, Camera, XCircle, Edit, CreditCard, Pencil } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { 
   Dialog, 
@@ -40,6 +40,7 @@ import Link from 'next/link';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription as UIDescription } from "@/components/ui/alert"; 
 import { cn } from '@/lib/utils';
+import { Checkbox } from '@/components/ui/checkbox';
 
 
 const today = new Date();
@@ -60,6 +61,8 @@ const initialStudentFormState: StudentFormData = {
   photoFile: null,
   photoDataUri: null,
   selectedPaymentPlanName: undefined,
+  overriddenEnrollmentFee: undefined,
+  overriddenMonthlyFee: undefined,
 };
 
 export default function StudentsPage() {
@@ -77,17 +80,23 @@ export default function StudentsPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [activeCourseTab, setActiveCourseTab] = useState('all');
+  const [overrideFees, setOverrideFees] = useState(false);
+
+  const coursesWithStudents = useMemo(() => {
+    const courseIdsWithStudents = new Set(students.map(s => s.courseId));
+    return courses.filter(c => courseIdsWithStudents.has(c.id));
+  }, [students, courses]);
+
 
   useEffect(() => {
     if (studentForm.courseId && courses.length > 0) {
       const course = courses.find(c => c.id === studentForm.courseId);
       if (course) {
         setSelectedCourse(course);
-        // If switching to an installment course, set default plan if none selected
         if(course.paymentType === 'installment' && !studentForm.selectedPaymentPlanName && course.paymentPlans?.length > 0) {
             setStudentForm(prev => ({...prev, selectedPaymentPlanName: course.paymentPlans[0].name}));
         }
-        // If switching to a monthly course, clear the plan selection
         if (course.paymentType === 'monthly') {
             setStudentForm(prev => ({...prev, selectedPaymentPlanName: undefined}));
         }
@@ -97,7 +106,7 @@ export default function StudentsPage() {
     } else {
       setSelectedCourse(null);
     }
-  }, [studentForm.courseId, courses, studentForm.selectedPaymentPlanName]);
+  }, [studentForm.courseId, courses]);
 
 
   useEffect(() => {
@@ -129,14 +138,13 @@ export default function StudentsPage() {
       }
       setHasCameraPermission(null); 
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isCameraOpen]);
+  }, [isCameraOpen, toast]);
 
 
   const handleStudentFormInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-     if (name === 'courseDurationValue') {
-      setStudentForm(prev => ({ ...prev, [name]: parseInt(value) || 1 }));
+     if (name === 'courseDurationValue' || name === 'overriddenEnrollmentFee' || name === 'overriddenMonthlyFee') {
+      setStudentForm(prev => ({ ...prev, [name]: value === '' ? undefined : parseFloat(value) }));
     } else {
       setStudentForm(prev => ({ ...prev, [name]: value }));
     }
@@ -210,15 +218,20 @@ export default function StudentsPage() {
 
     try {
       if (editingStudent) {
-        // This needs to be adapted to send the full StudentFormData shape for update logic in AppContext
          await updateStudent(editingStudent.id, {
           ...studentForm,
+          overriddenEnrollmentFee: overrideFees ? studentForm.overriddenEnrollmentFee : null,
+          overriddenMonthlyFee: overrideFees ? studentForm.overriddenMonthlyFee : null,
           photoToBeRemoved: photoPreview === null && !!editingStudent.photoUrl && !studentForm.photoFile && !studentForm.photoDataUri,
         });
         toast({ title: "Success", description: "Student details updated successfully." });
 
       } else {
-        await addStudent(studentForm); 
+        await addStudent({
+            ...studentForm,
+            overriddenEnrollmentFee: overrideFees ? studentForm.overriddenEnrollmentFee : undefined,
+            overriddenMonthlyFee: overrideFees ? studentForm.overriddenMonthlyFee : undefined,
+        }); 
         toast({ title: "Success", description: "Student added successfully. Enrollment fee pending." });
       }
 
@@ -235,15 +248,8 @@ export default function StudentsPage() {
 
   const openAddStudentDialog = () => {
     setEditingStudent(null);
-    const todayForForm = new Date();
-    setStudentForm({
-        ...initialStudentFormState,
-        enrollmentDate: {
-          day: String(todayForForm.getDate()).padStart(2, '0'),
-          month: String(todayForForm.getMonth() + 1).padStart(2, '0'),
-          year: String(todayForForm.getFullYear()),
-        }
-      });
+    setStudentForm(initialStudentFormState);
+    setOverrideFees(false);
     setSelectedCourse(null);
     handleRemovePhoto(); 
     setIsCameraOpen(false); 
@@ -252,7 +258,6 @@ export default function StudentsPage() {
   
   const openEditStudentDialog = (student: Student) => {
     setEditingStudent(student);
-    
     const enrollmentDateParts = student.enrollmentDate.split('T')[0].split('-');
     
     setStudentForm({
@@ -268,7 +273,10 @@ export default function StudentsPage() {
       photoFile: null, 
       photoDataUri: null,
       selectedPaymentPlanName: student.selectedPaymentPlanName,
+      overriddenEnrollmentFee: student.overriddenEnrollmentFee,
+      overriddenMonthlyFee: student.overriddenMonthlyFee,
     });
+    setOverrideFees(!!student.overriddenEnrollmentFee || !!student.overriddenMonthlyFee);
     setPhotoPreview(student.photoUrl || null);
     setIsCameraOpen(false);
     setIsStudentFormDialogOpen(true);
@@ -278,16 +286,9 @@ export default function StudentsPage() {
      setIsStudentFormDialogOpen(false);
      handleCloseCamera(); 
      setEditingStudent(null); 
-     handleRemovePhoto(); 
-     const todayForForm = new Date();
-     setStudentForm({
-        ...initialStudentFormState,
-        enrollmentDate: {
-            day: String(todayForForm.getDate()).padStart(2, '0'),
-            month: String(todayForForm.getMonth() + 1).padStart(2, '0'),
-            year: String(todayForForm.getFullYear()),
-        }
-     });
+     handleRemovePhoto();
+     setStudentForm(initialStudentFormState);
+     setOverrideFees(false);
   }
 
   const handleMarkAsLeft = async (studentId: string) => {
@@ -368,19 +369,11 @@ export default function StudentsPage() {
                 )}
                 <Tabs defaultValue="upload" className="w-full">
                     <TabsList className="grid w-full grid-cols-2">
-                        <TabsTrigger value="upload"><ImageUp className="mr-2 h-4 w-4" />Upload Photo</TabsTrigger>
-                        <TabsTrigger value="camera"><Camera className="mr-2 h-4 w-4" />Use Camera</TabsTrigger>
+                        <TabsTrigger value="upload"><ImageUp className="mr-2 h-4 w-4" />Upload</TabsTrigger>
+                        <TabsTrigger value="camera"><Camera className="mr-2 h-4 w-4" />Camera</TabsTrigger>
                     </TabsList>
                     <TabsContent value="upload" className="mt-4">
-                        <Input 
-                            id="photoFile" 
-                            name="photoFile" 
-                            type="file" 
-                            accept="image/*" 
-                            onChange={handlePhotoFileChange} 
-                            ref={fileInputRef}
-                        />
-                        <p className="text-xs text-muted-foreground mt-1">Upload a JPG, PNG, or GIF file.</p>
+                        <Input id="photoFile" name="photoFile" type="file" accept="image/*" onChange={handlePhotoFileChange} ref={fileInputRef} />
                     </TabsContent>
                     <TabsContent value="camera" className="mt-4 space-y-3">
                         {isCameraOpen ? (
@@ -389,21 +382,15 @@ export default function StudentsPage() {
                                 <canvas ref={canvasRef} className="hidden" />
                                 {hasCameraPermission === false && (
                                     <Alert variant="destructive">
-                                      <UIDescription>Camera access denied. Please enable permissions in your browser settings.</UIDescription>
+                                      <UIDescription>Camera access denied. Please enable permissions.</UIDescription>
                                     </Alert>
                                 )}
                                 <div className="flex gap-2">
-                                    <Button type="button" onClick={handleCapturePhoto} disabled={!hasCameraPermission}>
-                                        <Camera className="mr-2 h-4 w-4" /> Capture
-                                    </Button>
-                                    <Button type="button" variant="outline" onClick={handleCloseCamera}>Close Camera</Button>
+                                    <Button type="button" onClick={handleCapturePhoto} disabled={!hasCameraPermission}><Camera className="mr-2 h-4 w-4" /> Capture</Button>
+                                    <Button type="button" variant="outline" onClick={handleCloseCamera}>Close</Button>
                                 </div>
                             </div>
-                        ) : (
-                            <Button type="button" onClick={handleOpenCamera} className="w-full">
-                                <Camera className="mr-2 h-4 w-4" /> Open Camera
-                            </Button>
-                        )}
+                        ) : ( <Button type="button" onClick={handleOpenCamera} className="w-full"><Camera className="mr-2 h-4 w-4" /> Open Camera</Button> )}
                     </TabsContent>
                 </Tabs>
             </div>
@@ -425,21 +412,42 @@ export default function StudentsPage() {
             </div>
             
             {selectedCourse && (
-                <div className="p-3 border rounded-md bg-primary/5 text-sm">
-                    <p>Payment Type: <span className="font-bold text-primary capitalize">{selectedCourse.paymentType}</span></p>
-                    {selectedCourse.paymentType === 'monthly' ? (
-                        <p>Monthly Fee: <span className="font-bold text-primary">₹{selectedCourse.monthlyFee.toLocaleString()}</span></p>
-                    ) : selectedCourse.paymentPlans?.length > 0 && (
-                        <div className="mt-2 space-y-1">
-                          <Label htmlFor="selectedPaymentPlanName">Payment Plan</Label>
-                          <Select name="selectedPaymentPlanName" value={studentForm.selectedPaymentPlanName} onValueChange={(value) => setStudentForm(prev => ({ ...prev, selectedPaymentPlanName: value }))} required>
-                            <SelectTrigger><SelectValue placeholder="Select a payment plan" /></SelectTrigger>
-                            <SelectContent>
-                              {selectedCourse.paymentPlans.map(plan => (
-                                <SelectItem key={plan.name} value={plan.name}>{plan.name} (Total: ₹{plan.totalAmount.toLocaleString()})</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                <div className="p-3 border rounded-md bg-primary/5 text-sm space-y-3">
+                    <div>
+                        <p>Payment Type: <span className="font-bold text-primary capitalize">{selectedCourse.paymentType}</span></p>
+                        {selectedCourse.paymentType === 'monthly' ? (
+                            <p>Default Monthly Fee: <span className="font-bold text-primary">₹{selectedCourse.monthlyFee.toLocaleString()}</span></p>
+                        ) : selectedCourse.paymentPlans?.length > 0 && (
+                            <div className="mt-2 space-y-1">
+                              <Label htmlFor="selectedPaymentPlanName">Payment Plan</Label>
+                              <Select name="selectedPaymentPlanName" value={studentForm.selectedPaymentPlanName} onValueChange={(value) => setStudentForm(prev => ({ ...prev, selectedPaymentPlanName: value }))} required>
+                                <SelectTrigger><SelectValue placeholder="Select a payment plan" /></SelectTrigger>
+                                <SelectContent>
+                                  {selectedCourse.paymentPlans.map(plan => (
+                                    <SelectItem key={plan.name} value={plan.name}>{plan.name} (Total: ₹{plan.totalAmount.toLocaleString()})</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                        )}
+                        <p>Default Enrollment Fee: <span className="font-bold text-primary">₹{selectedCourse.enrollmentFee.toLocaleString()}</span></p>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                        <Checkbox id="overrideFees" checked={overrideFees} onCheckedChange={(checked) => setOverrideFees(!!checked)} />
+                        <Label htmlFor="overrideFees">Override default fees for this student</Label>
+                    </div>
+                    {overrideFees && (
+                        <div className="space-y-2 pt-2 animate-slide-in">
+                            <div className="space-y-1">
+                                <Label htmlFor="overriddenEnrollmentFee">Overridden Enrollment Fee (₹)</Label>
+                                <Input id="overriddenEnrollmentFee" name="overriddenEnrollmentFee" type="number" value={studentForm.overriddenEnrollmentFee ?? ''} onChange={handleStudentFormInputChange} placeholder={`Default: ${selectedCourse.enrollmentFee}`} />
+                            </div>
+                             {selectedCourse.paymentType === 'monthly' && (
+                                <div className="space-y-1">
+                                    <Label htmlFor="overriddenMonthlyFee">Overridden Monthly Fee (₹)</Label>
+                                    <Input id="overriddenMonthlyFee" name="overriddenMonthlyFee" type="number" value={studentForm.overriddenMonthlyFee ?? ''} onChange={handleStudentFormInputChange} placeholder={`Default: ${selectedCourse.monthlyFee}`} />
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
@@ -486,6 +494,9 @@ export default function StudentsPage() {
   }
 
   const activeStudentsList = students.filter(s => s.status === 'active' || s.status === 'enrollment_pending' || s.status === 'completed_unpaid');
+  const filteredStudents = activeCourseTab === 'all'
+    ? activeStudentsList
+    : activeStudentsList.filter(s => s.courseId === activeCourseTab);
 
   if (activeStudentsList.length === 0 && !isLoading) {
     return (
@@ -493,16 +504,12 @@ export default function StudentsPage() {
         {pageHeader}
         <Card className="shadow-lg text-center py-12 animate-slide-in">
           <CardHeader>
-            <div className="mx-auto bg-primary/10 p-3 rounded-full w-fit">
-                <Users className="h-12 w-12 text-primary" />
-            </div>
+            <div className="mx-auto bg-primary/10 p-3 rounded-full w-fit"> <Users className="h-12 w-12 text-primary" /></div>
             <CardTitle className="mt-4 text-2xl font-headline">No Active Students Enrolled</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-muted-foreground">Add your first student to get started.</p>
-             <Button onClick={openAddStudentDialog} className="mt-6 animate-button-click">
-                <PlusCircle className="mr-2 h-5 w-5" /> Add First Student
-            </Button>
+             <Button onClick={openAddStudentDialog} className="mt-6 animate-button-click"><PlusCircle className="mr-2 h-5 w-5" /> Add First Student</Button>
           </CardContent>
         </Card>
         {renderStudentDialog()}
@@ -513,9 +520,20 @@ export default function StudentsPage() {
   return (
     <>
       {pageHeader}
-      <ScrollArea className="h-[calc(100vh-20rem)]">
+       <Tabs value={activeCourseTab} onValueChange={setActiveCourseTab} className="mb-6">
+        <TabsList>
+            <TabsTrigger value="all">All Students ({activeStudentsList.length})</TabsTrigger>
+            {coursesWithStudents.map(course => (
+                 <TabsTrigger key={course.id} value={course.id}>
+                    {course.name} ({activeStudentsList.filter(s => s.courseId === course.id).length})
+                </TabsTrigger>
+            ))}
+        </TabsList>
+      </Tabs>
+
+      <ScrollArea className="h-[calc(100vh-25rem)]">
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 animate-slide-in">
-          {activeStudentsList.map((student) => {
+          {filteredStudents.map((student) => {
             const course = courses.find(c => c.id === student.courseId);
             const enrollmentDateObj = new Date(student.enrollmentDate);
             const formattedEnrollmentDate = !isNaN(enrollmentDateObj.getTime()) ? enrollmentDateObj.toLocaleDateString() : 'N/A';
@@ -540,61 +558,26 @@ export default function StudentsPage() {
                     </div>
                      <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8">
-                                <MoreVertical className="h-5 w-5" />
-                                <span className="sr-only">Student Actions</span>
-                            </Button>
+                            <Button variant="ghost" size="icon" className="h-8 w-8"><MoreVertical className="h-5 w-5" /><span className="sr-only">Student Actions</span></Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                           <DropdownMenuItem onClick={() => openEditStudentDialog(student)} className="cursor-pointer">
-                                <Edit className="mr-2 h-4 w-4" /> Edit Student
-                           </DropdownMenuItem>
+                           <DropdownMenuItem onClick={() => openEditStudentDialog(student)} className="cursor-pointer"><Edit className="mr-2 h-4 w-4" /> Edit Student</DropdownMenuItem>
                            <DropdownMenuItem asChild>
-                             <Link href="/billing" className="flex items-center w-full cursor-pointer">
-                                <CreditCard className="mr-2 h-4 w-4" /> Manage Fees
-                             </Link>
+                             <Link href="/billing" className="flex items-center w-full cursor-pointer"><CreditCard className="mr-2 h-4 w-4" /> Manage Fees</Link>
                            </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                    <DropdownMenuItem onSelect={(e) => e.preventDefault()} className="cursor-pointer">
-                                        <UserMinus className="mr-2 h-4 w-4 text-orange-500" /> Mark as Left
-                                    </DropdownMenuItem>
-                                </AlertDialogTrigger>
+                                <AlertDialogTrigger asChild><DropdownMenuItem onSelect={(e) => e.preventDefault()} className="cursor-pointer"><UserMinus className="mr-2 h-4 w-4 text-orange-500" /> Mark as Left</DropdownMenuItem></AlertDialogTrigger>
                                 <AlertDialogContent>
-                                    <AlertDialogHeader>
-                                    <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                                    <AlertDialogDescription>
-                                        This will mark {student.name} as having left the academy. Their records will be moved to archived.
-                                    </AlertDialogDescription>
-                                    </AlertDialogHeader>
-                                    <AlertDialogFooter>
-                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                    <AlertDialogAction onClick={() => handleMarkAsLeft(student.id)} className={cn(buttonVariants({variant: "outline"}))}>
-                                        Confirm
-                                    </AlertDialogAction>
-                                    </AlertDialogFooter>
+                                    <AlertDialogHeader><AlertDialogTitle>Are you sure?</AlertDialogTitle><AlertDialogDescription>This will mark {student.name} as having left the academy. Their records will be moved to archived.</AlertDialogDescription></AlertDialogHeader>
+                                    <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleMarkAsLeft(student.id)} className={cn(buttonVariants({variant: "outline"}))}>Confirm</AlertDialogAction></AlertDialogFooter>
                                 </AlertDialogContent>
                             </AlertDialog>
                             <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                    <DropdownMenuItem onSelect={(e) => e.preventDefault()} className="cursor-pointer">
-                                        <Trash2 className="mr-2 h-4 w-4 text-destructive" /> Delete Student
-                                    </DropdownMenuItem>
-                                </AlertDialogTrigger>
+                                <AlertDialogTrigger asChild><DropdownMenuItem onSelect={(e) => e.preventDefault()} className="cursor-pointer"><Trash2 className="mr-2 h-4 w-4 text-destructive" /> Delete Student</DropdownMenuItem></AlertDialogTrigger>
                                 <AlertDialogContent>
-                                    <AlertDialogHeader>
-                                    <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                                    <AlertDialogDescription>
-                                        This action cannot be undone. This will permanently delete {student.name} and all their associated data, including payment history and photo.
-                                    </AlertDialogDescription>
-                                    </AlertDialogHeader>
-                                    <AlertDialogFooter>
-                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                    <AlertDialogAction onClick={() => handleDeleteStudent(student.id)} className={cn(buttonVariants({variant: "destructive"}))}>
-                                        Delete Student
-                                    </AlertDialogAction>
-                                    </AlertDialogFooter>
+                                    <AlertDialogHeader><AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle><AlertDialogDescription>This action cannot be undone. This will permanently delete {student.name} and all their associated data, including payment history and photo.</AlertDialogDescription></AlertDialogHeader>
+                                    <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleDeleteStudent(student.id)} className={cn(buttonVariants({variant: "destructive"}))}>Delete Student</AlertDialogAction></AlertDialogFooter>
                                 </AlertDialogContent>
                             </AlertDialog>
                         </DropdownMenuContent>

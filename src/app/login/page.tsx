@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { AlertCircle, LogIn } from 'lucide-react';
+import { AlertCircle, LogIn, Eye, EyeOff } from 'lucide-react';
 import { useAppContext } from '@/lib/context/AppContext';
 import { APP_NAME } from '@/lib/constants';
 
@@ -20,6 +20,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,22 +62,35 @@ export default function LoginPage() {
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="e.g., sunilsir"
+                placeholder="e.g., sunil singh"
                 required
                 disabled={isLoading}
               />
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                required
-                disabled={isLoading}
-              />
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  required
+                  disabled={isLoading}
+                  className="pr-10"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 text-muted-foreground"
+                  onClick={() => setShowPassword(prev => !prev)}
+                >
+                  {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  <span className="sr-only">{showPassword ? 'Hide password' : 'Show password'}</span>
+                </Button>
+              </div>
             </div>
             {error && (
               <Alert variant="destructive">
